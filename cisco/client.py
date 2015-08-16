@@ -6,6 +6,7 @@ import asyncssh
 import asyncio
 import os
 import re
+import inspect
 import logging
 
 __ALL__ = ['CiscoSSHClient']
@@ -36,7 +37,14 @@ class _FutureCommand(asyncio.Future):
         """
         Called when the future is done.
         """
-        self._cmd_done_callback(self.cmd, future.result())
+        argspec = inspect.getargspec(self._cmd_done_callback)
+        is_method = inspect.ismethod(self._cmd_done_callback)
+        if len(argspec.args) == 2 and not is_method:
+            args = (self.cmd, future.result())
+        else:
+            args = (future.result(),)
+
+        self._cmd_done_callback(*args)
 
     @property
     def cmd(self):
@@ -96,7 +104,12 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
 
     def exec_cmd_callback(self, cmd, callback):
         """
-        Queue a command for execution and send the output to a callback on completion.
+        Queue a command for execution and send the output to a callback on
+        completion.
+
+        :param cmd: The command to execute.
+        :param callback: The callback to run on completion. It can take one or
+        two arguments: (output) or (cmd, output).
         """
         self._queue_cmd(cmd, callback)
 
