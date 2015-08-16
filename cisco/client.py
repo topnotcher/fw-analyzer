@@ -169,6 +169,9 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         if result and re.match('^.+> $', result[0]):
             yield from self._enable()
 
+        self._send_cmd('terminal pager 0')
+        yield from self.collect_until_prompt(b'^.+# ')
+
     @asyncio.coroutine
     def _enable(self):
         """
