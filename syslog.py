@@ -2,6 +2,10 @@ from time import mktime, strptime, strftime
 
 import pub
 
+class SyslogListener(object):
+    def syslog_received(self, time, src, msg):
+        raise NotImplementedError
+
 class SyslogServer(object):
     def __init__(self, bind_addr='0.0.0.0', bind_port=514):
         self._bind = (bind_addr, bind_port)

@@ -32,7 +32,7 @@ class _FutureCommand(asyncio.Future):
         """
         Called when the future is done.
         """
-        self._cmd_done_callback(future.result())
+        self._cmd_done_callback(self.cmd, future.result())
 
     @property
     def cmd(self):
@@ -41,7 +41,7 @@ class _FutureCommand(asyncio.Future):
         """
         return self._cmd
 
-class CiscoSSHClient(asyncssh.SSHClient):
+class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-attributes
     """
     An asyncio-based SSH connection to a Cisco ASA. The connection is lazy: it
     connects or reconnects when there are commends to run. After connecting, it
@@ -265,8 +265,7 @@ class CiscoSSHClient(asyncssh.SSHClient):
         if not result:
             return None
         else:
-            prompt, data = result
-            return data
+            return result[1]
 
 def get_last_line(buf, sep):
     """
@@ -278,23 +277,14 @@ def get_last_line(buf, sep):
     else:
         return buf[pos + len(sep):]
 
-def _print_cmd_output(cmd, one):
-    """
-    Return a function to print command output.
-    """
-    def _print_multi(data):
-        """ Print multi line output. """
-        sep = '-' * 50
-        print('%s\n%s\n%s\n%s' % (cmd, sep, data, sep))
+def _multi_line_cmd_output(cmd, data):
+    """ Print multi line output. """
+    sep = '-' * 50
+    print('%s\n%s\n%s\n%s' % (cmd, sep, data, sep))
 
-    def _print_one(data):
-        """ Print single line output. """
-        print('%s: %s' % (cmd, data))
-
-    if one:
-        return _print_one
-    else:
-        return _print_multi
+def _single_line_cmd_output(cmd, data):
+    """ Print single line output. """
+    print('%s: %s' % (cmd, data))
 
 @asyncio.coroutine
 def _test_coro(client):
@@ -303,15 +293,16 @@ def _test_coro(client):
     """
     cmd = 'show mode'
     result = yield from client.exec_cmd(cmd)
+    _single_line_cmd_output(cmd, result)
 
-    printer = _print_cmd_output(cmd, True)
-    printer(result)
-
-    def quitter(data):
+    def quitter(cmd, data): # pylint: disable=unused-argument
+        """
+        Close the connection :o
+        """
         client.close()
-        client.exec_cmd_callback('show run ssh timeout', _print_cmd_output('show run ssh timeout', True))
+        client.exec_cmd_callback('show run ssh timeout', _single_line_cmd_output)
 
-    client.exec_cmd_callback('show vpn-sessiondb', _print_cmd_output('show vpn-sessiondb', False))
+    client.exec_cmd_callback('show vpn-sessiondb', _multi_line_cmd_output)
     client.exec_cmd_callback('show run ssh timeout', quitter)
 
 def main():
@@ -323,12 +314,16 @@ def main():
     client = CiscoSSHClient(sys.argv[1], sys.argv[2], sys.argv[3], loop)
 
     loop.create_task(_test_coro(client))
-    cmds = (('show clock', True), ('show run ip address', False), ('show firewall', True))
-    for cmd, one in cmds:
-        client.exec_cmd_callback(cmd, _print_cmd_output(cmd, one))
+    cmds = (
+        ('show clock', _single_line_cmd_output),
+        ('show run ip address', _multi_line_cmd_output),
+        ('show firewall', _single_line_cmd_output)
+    )
+    for cmd, printer in cmds:
+        client.exec_cmd_callback(cmd, printer)
 
     # Assuming SSH timeout is 5 minutes, run this at six minutes to test reconnecting.
-    loop.call_later(60*6, lambda: client.exec_cmd_callback('show clock', _print_cmd_output('show clock', True)))
+    loop.call_later(60*6, lambda: client.exec_cmd_callback('show clock', _single_line_cmd_output))
     loop.run_forever()
 
 if __name__ == '__main__':
