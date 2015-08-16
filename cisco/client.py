@@ -4,6 +4,7 @@ Utilities for using asyncio to SSH into a Cisco ASA.
 
 import asyncssh
 import asyncio
+import os
 import re
 import logging
 
@@ -220,7 +221,11 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
 
                 if result:
                     drop_len = len(self._linesep) + len(last_line)
-                    return result.group(0).decode('utf-8'), buf[ignore_echo : -1 * drop_len].decode('utf-8')
+
+                    # Strip echoed chars, drop the last line, and normalize line-endings.
+                    output = buf[ignore_echo : -1 * drop_len].replace(self._linesep, os.linesep.encode('utf-8'))
+
+                    return last_line.decode('utf-8'), output.decode('utf-8')
                 elif timeout_counter >= timeout:
                     # NOTE: returning None if prompt is not found
                     return None
