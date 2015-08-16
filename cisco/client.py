@@ -10,6 +10,9 @@ import logging
 
 __ALL__ = ['CiscoSSHClient']
 
+PRIV_PROMPT = b'^.+# $'
+PASS_PROMPT = b'^Password: $'
+
 class _FutureCommand(asyncio.Future):
     """
     A Future that represents a commands to be run on an ASA at some point in
@@ -166,11 +169,11 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         result = yield from self.collect_until_prompt(b'^.+[#>] $')
 
         # TODO: the result=None case is not handled!
-        if result and re.match('^.+> $', result[0]):
+        if result and result[0].endswith('> '):
             yield from self._enable()
 
         self._send_cmd('terminal pager 0')
-        yield from self.collect_until_prompt(b'^.+# ')
+        yield from self.collect_until_prompt(PRIV_PROMPT)
 
     @asyncio.coroutine
     def _enable(self):
@@ -178,12 +181,12 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         enable: Enter privileged EXEC mode.
         """
         echo_size = self._send_cmd('enable')
-        result = yield from self.collect_until_prompt(b'Password: ', ignore_echo=echo_size)
+        result = yield from self.collect_until_prompt(PASS_PROMPT, ignore_echo=echo_size)
 
         # TODO: None case not handled
         if result is not None:
             self._send_cmd(self._login['password'])
-            yield from self.collect_until_prompt(b'^.+# ')
+            yield from self.collect_until_prompt(PRIV_PROMPT)
 
     @asyncio.coroutine
     def collect_until_prompt(self, prompt, timeout=5.0, ignore_echo=0):
@@ -271,8 +274,7 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         """
         echo_size = self._send_cmd(cmd)
 
-        match_prompt = b'^.+# '
-        result = yield from self.collect_until_prompt(match_prompt, ignore_echo=echo_size)
+        result = yield from self.collect_until_prompt(PRIV_PROMPT, ignore_echo=echo_size)
 
         if not result:
             return None
