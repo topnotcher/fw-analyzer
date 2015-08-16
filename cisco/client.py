@@ -77,6 +77,7 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         # Connection idle timeout (client side)
         self._timeout = 180
 
+        self.log = logging.getLogger(self.__class__.__name__)
         self._queue = asyncio.Queue(loop=self._loop)
         self._running = True
         self._task = self._loop.create_task(self._run())
@@ -142,6 +143,7 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
                 yield from self._lazy_connect()
                 result = yield from self._exec_cmd(fut.cmd)
 
+                self.log.debug('cmd "%s" collected: %s', fut.cmd, result)
                 fut.set_result(result)
             except asyncio.TimeoutError:
                 self.close()
@@ -227,6 +229,7 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
 
                     return last_line.decode('utf-8'), output.decode('utf-8')
                 elif timeout_counter >= timeout:
+                    self.log.debug('Collect timed out!')
                     # NOTE: returning None if prompt is not found
                     return None
 
@@ -244,6 +247,7 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         """
         Send a command to the server.
         """
+        self.log.debug('SEND: %s', cmd)
         if not isinstance(cmd, bytes):
             send_cmd = cmd.encode('ascii')
         else:
