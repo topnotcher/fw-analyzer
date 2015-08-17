@@ -16,6 +16,8 @@ __ALL__ = [
 
 import asyncio
 import re
+import time
+import os
 import logging
 
 from ..syslog import SyslogListener
@@ -71,22 +73,10 @@ class CiscoFwContext(object):
         """
         return self._conn.exec_cmd_callback(cmd, callback)
 
-    def exec_sys_cmd_callback(self, cmd, callback):
-        """
-        Like :meth:`exec_cmd_callback`, but on the system context. Only valid if
-        this is the admin context.
-        """
-        if self.is_admin and self._sys_conn:
-            self._sys_conn.exec_cmd_callback(cmd, callback)
-
-    @asyncio.coroutine
-    def exec_sys_cmd(self, cmd):
-        """
-        Like :meth:`exec_cmd`, but on the system context. Only valid if this is
-        the admin context.
-        """
-        if self.is_admin and self._sys_conn:
-            return (yield from self._sys_conn.exec_cmd(cmd))
+    @property
+    def sys_conn(self):
+        if self._is_admin and self._sys_conn:
+            return self._sys_conn
         else:
             return None
 
@@ -216,17 +206,103 @@ class _SingleContextExecutor(object):
         """
         return self._conn.exec_cmd_callback(self._context, cmd, callback)
 
+class _ManagedConfig(object):
+    def __init__(self, config_manager, context, store):
+        # timestamp the config was last retrieved
+        self._config_timestamp = 0
+        self._context = context
+        self._config_manager = config_manager
+
+        # Some backing store where we save the config
+        self._store = store
+
+        # Checksum of the last stored config
+        self._checksum = None
+
+        log_name = '%s(%s)' % (self.__class__.__name__, self._context.name)
+        self.log = logging.getLogger(log_name)
+
+    def check(self):
+        self._context.exec_cmd_callback('show checksum', self._compare_checksum)
+
+    def _compare_checksum(self, show_checksum):
+        checksum = _parse_checksum(show_checksum)
+
+        if checksum != self._checksum:
+            self.log.debug('Checksum mismatch: updating config!')
+            self._get_config()
+        else:
+            self.log.debug('Checksum matches!')
+
+    def _get_config(self):
+        self._context.exec_cmd_callback('show run', self._receive_config)
+
+    def _receive_config(self, config_output):
+        checksum_line, config = self._parse_config_checksum(config_output)
+
+        if checksum_line is None:
+            return
+
+        checksum = _parse_checksum(checksum_line)
+        if checksum is not None:
+            self._checksum = checksum
+            self._save_config(config)
+
+    def _save_config(self, config):
+        self._config_timestamp = time.time()
+        self._config_manager.config_updated()
+
+    @staticmethod
+    def _parse_config_checksum(config):
+        lpos = config.rfind('Cryptochecksum:')
+        rpos = -1
+
+        if lpos != -1:
+            rpos = config.rfind(os.linesep, lpos)
+
+        if lpos != -1 and rpos != -1:
+            cryptochecksum = config[lpos:rpos]
+            return cryptochecksum, config[:lpos] + config[rpos+1:]
+        else:
+            return None, None
+
+class CiscoFwConfigManager(object):
+    def __init__(self, manager, context):
+        self._context = context
+        self._manager = manager
+
+        log_name = '%s(%s)' % (self.__class__.__name__, self._context.name)
+        self.log = logging.getLogger(log_name)
+
+        self._configs = [_ManagedConfig(self, context, None)]
+
+        # This is somewhat dirty...
+        if self._context.is_admin and self._context.sys_conn:
+            self._configs.append(_ManagedConfig(self, self._context.sys_conn, None))
+
+        self.check_config()
+
+    def config_updated(self):
+        self.log.debug('Config updated')
+
+    def check_config(self):
+        for config in self._configs:
+            config.check()
+
 class _CiscoFwContextManager(object):
 
     def __init__(self, context):
         self._context = context
         self._ips = []
+        self._plugins = []
 
         log_name = '%s(%s)' % (self.__class__.__name__, self._context.name)
         self.log = logging.getLogger(log_name)
 
         #  NOTE: This does _not_ filter out addresses on down interfaces.
         self._context.exec_cmd_callback('show run ip address', self._populate_ips)
+
+        self._plugins.append(CiscoFwConfigManager(self, self._context))
 
     def _populate_ips(self, show_ip):
         """
@@ -390,7 +466,8 @@ def enumerate_contexts(conn):
         # from the admin context, the admin context becomes responsible for
         # the system context.
         if is_admin:
-            context = CiscoFwContext(name, fw_conn_factory(name), True, fw_conn_factory('system'))
+            sys_conn = CiscoFwContext('system', fw_conn_factory('system'), False)
+            context = CiscoFwContext(name, fw_conn_factory(name), True, sys_conn)
         else:
             context = CiscoFwContext(name, fw_conn_factory(name), False)
 
@@ -399,6 +476,19 @@ def enumerate_contexts(conn):
         context_objs.append(context)
 
     return context_objs
+
+def _parse_checksum(checksum):
+    """
+    Parse the output of show checksum or the checksum in a config.
+    """
+    # show checksum has spaces >:O
+    checksum = checksum.lower().replace(' ', '')
+    try:
+        key, value = checksum.split(':')
+        assert key == 'cryptochecksum'
+        return value
+    except (ValueError, AssertionError):
+        return None
 
 @asyncio.coroutine
 def _get_hostname(conn):
