@@ -2,8 +2,8 @@
 Utilities for managing Cisco ASAs in single or multiple context mode.
 
 In multiple context mode, all of the contexts can be managed by a single
-class:`CiscoFwManager` instance, which relies on a
-class:`MultiContextExecutor` instance to ensure that context commands are
+:class:`CiscoFwManager` instance, which relies on a
+:class:`MultiContextExecutor` instance to ensure that context commands are
 executed in the appropriate context.
 """
 
@@ -25,7 +25,7 @@ class CiscoFwContext(object):
     """
     A single Cisco firewall or firewall context: either a single context of a
     device in multiple context mode or a single device in single context mode.
-    In either case, meth:`exec_cmd` and meth:`exec_cmd_callback` should run
+    In either case, :meth:`exec_cmd` and :meth:`exec_cmd_callback` should run
     commands appropriately.
     """
 
@@ -33,11 +33,11 @@ class CiscoFwContext(object):
         """
         :param name: The name of the context or hostname of the device.
         :param conn: The SSH connection to the ASA. This is either a
-        class:`_SingleContextExecutor` instance or a class:`CiscoSSHClient`
+        :class:`_SingleContextExecutor` instance or a :class:`CiscoSSHClient`
         instance.
         :param is_admin: Whether this is the admin context.
         :param sys_conn: If this is the admin context, a
-        class:`_SingleContextExecutor` instance pointing to the system context.
+        :class:`_SingleContextExecutor` instance pointing to the system context.
         """
         self._name = name
         self._is_admin = is_admin
@@ -54,7 +54,8 @@ class CiscoFwContext(object):
         behaves the same way, but is a wrapper around
         _SingleContextExecutor.exec_cmd().
 
-        See class:`MultiContextExecutor` and class:`_SingleContextExecutor`
+        ..seealso::
+            :class:`MultiContextExecutor` and :class:`_SingleContextExecutor`.
         """
         return (yield from self._conn.exec_cmd(cmd))
 
@@ -65,13 +66,14 @@ class CiscoFwContext(object):
         mode, it behaves the same way, but is a wrapper around
         _SingleContextExecutor.exec_cmd_callback().
 
-        See class:`MultiContextExecutor` and class:`_SingleContextExecutor`
+        ..seealso::
+            :class:`MultiContextExecutor` and :class:`_SingleContextExecutor`.
         """
         return self._conn.exec_cmd_callback(cmd, callback)
 
     def exec_sys_cmd_callback(self, cmd, callback):
         """
-        Like meth:`exec_cmd_callback`, but on the system context. Only valid if
+        Like :meth:`exec_cmd_callback`, but on the system context. Only valid if
         this is the admin context.
         """
         if self.is_admin and self._sys_conn:
@@ -80,7 +82,7 @@ class CiscoFwContext(object):
     @asyncio.coroutine
     def exec_sys_cmd(self, cmd):
         """
-        Like meth:`exec_cmd`, but on the system context. Only valid if this is
+        Like :meth:`exec_cmd`, but on the system context. Only valid if this is
         the admin context.
         """
         if self.is_admin and self._sys_conn:
@@ -100,7 +102,7 @@ class CiscoFwContext(object):
 
 class MultiContextExecutor(object):
     """
-    A proxy to class:`CiscoSSHClient` that allows executing commands on a given
+    A proxy to :class:`CiscoSSHClient` that allows executing commands on a given
     context when the ASA is in multiple context mode.
 
     Example usage is as follows::
@@ -116,11 +118,11 @@ class MultiContextExecutor(object):
 
 
     When MultiContextExecutor is used, it is assumed that all commands executed
-    on the underlying class:`CiscoSSHClient` object are run through the
+    on the underlying :class:`CiscoSSHClient` object are run through the
     MultiContextExecutor instance. In particular, if changeto commands are run
     outside of MultiContextExecutor, bad things happen.
 
-    When meth:`exec_cmd` or meth:`exec_cmd_callback` is called  and the
+    When :meth:`exec_cmd` or :meth:`exec_cmd_callback` is called  and the
     requested context does not match the context sent in the last changeto
     command, a changeto context command is sent before sending the
     actual command. It is thus crucial that commands are executed in order.
@@ -133,8 +135,9 @@ class MultiContextExecutor(object):
     @asyncio.coroutine
     def exec_cmd(self, context, cmd):
         """
-        Execute a given command on a given context. See
-        CiscoSSHClient.exec_cmd().
+        Execute a given command on a given context.
+
+        ..seealso:: :meth:`CiscoSSHClient.exec_cmd`.
 
         :param string context: The context to execute the command on.
         :param string cmd: The command to execute.
@@ -168,14 +171,14 @@ class MultiContextExecutor(object):
 
 class _SingleContextExecutor(object):
     """
-    A wrapper around class:`MultiContextExecutor` that provides the same
-    interface as class:`CiscoSSHClient`. Users of this class do not care
-    whether they are using a class:`CiscoSSHClient` or
-    class:`_SingleContextExecutor` instance.
+    A wrapper around :class:`MultiContextExecutor` that provides the same
+    interface as :class:`CiscoSSHClient`. Users of this class do not care
+    whether they are using a :class:`CiscoSSHClient` or
+    :class:`_SingleContextExecutor` instance.
 
-    When multiple instances of class:`_SingleContextExecutor` share the same
-    `MultiContextExecutor` instance, class:`MultiContextExecutor` guarantees
-    that meth:`exec_cmd` or meth:`exec_cmd_callback` calls on the
+    When multiple instances of :class:`_SingleContextExecutor` share the same
+    `MultiContextExecutor` instance, :class:`MultiContextExecutor` guarantees
+    that :meth:`exec_cmd` or :meth:`exec_cmd_callback` calls on the
     `_SingleContextExecutor` instance are run on the correct context.
     """
     def __init__(self, context, conn):
@@ -190,7 +193,9 @@ class _SingleContextExecutor(object):
     @asyncio.coroutine
     def exec_cmd(self, cmd):
         """
-        Execute a given command on this context. See CiscoSSHClient.exec_cmd().
+        Execute a given command on this context.
+
+        ..seealso:: :meth:`CiscoSSHClient.exec_cmd`.
 
         :param string cmd: The command to execute.
 
@@ -201,7 +206,9 @@ class _SingleContextExecutor(object):
     def exec_cmd_callback(self, cmd, callback):
         """
         Execute a given command on this context, running a callback on
-        completion. See CiscoSSHClient.exec_cmd_callback().
+        completion.
+
+        ..seealso:: :meth:`CiscoSSHClient.exec_cmd_callback`
 
         :param string cmd: The command to execute.
         :param callback: A callback to run on the command's completion. The
@@ -271,7 +278,7 @@ class CiscoFwManager(SyslogListener):
     @asyncio.coroutine
     def contexts(self):
         """
-        Return a list of class:`CiscoFwContext` instances.
+        Return a list of :class:`CiscoFwContext` instances.
         """
         yield from self._initialized.wait()
         return self._contexts
@@ -318,9 +325,11 @@ def _parse_show_run_ip_addrs(show_ip):
 def enumerate_contexts(conn):
     """
     A convenience function for managing firewalls in multi context mode. A list
-    of class:`CiscoFwContext` instances is returned with one instance for each
+    of :class:`CiscoFwContext` instances is returned with one instance for each
     context. If the firewall is in multiple context mode, the list contains one
     entry.
+
+    ..seealso:: :class:`MultiContextExecutor`.
 
     For example, to connect to some arbitrary firewall (single or multiple
     context) and retrieve all context configs::
@@ -329,16 +338,14 @@ def enumerate_contexts(conn):
         for context in (yield from enumerate_contexts(conn)):
             context_config = context.exec_cmd('show run')
 
-    See class:`MultiContextExecutor`.
-
     1. Determine if the firewall is in multiple or single context mode.
         - Or if it is in multiple context mode, but we're connecting to a
           single context, treat it like single context mode.
-    2. Instantiate a class:`CiscoFwContext` object for each context.
+    2. Instantiate a :class:`CiscoFwContext` object for each context.
         - In multiple context mode, each context gets a
-          class:`_SingleContextExecutor` instance to allow executing
+          :class:`_SingleContextExecutor` instance to allow executing
           commands on the proper context.
-        - Each class:`CiscoFwContext` instance gathers a list of its IP
+        - Each :class:`CiscoFwContext` instance gathers a list of its IP
           addresses so we can filter syslogs to the correct context.
     """
     log = logging.getLogger('enumerate_contexts')
@@ -364,14 +371,14 @@ def enumerate_contexts(conn):
         hostname = yield from _get_hostname(conn)
         contexts = [(hostname, False)]
 
-        # In single mode, just pass through the class:`CiscoSSHClient` instance.
+        # In single mode, just pass through the :class:`CiscoSSHClient` instance.
         fw_conn_factory = lambda context: conn
     else:
         yield from conn.exec_cmd('changeto context system')
         contexts = yield from _get_contexts(conn)
 
-        # In multiple context mode, pass each class:`CiscoFwContext`
-        # instance a class:`_SingleContextExecutor` instance that makes it
+        # In multiple context mode, pass each :class:`CiscoFwContext`
+        # instance a :class:`_SingleContextExecutor` instance that makes it
         # think it is running in single context mode.
         multi_exec = MultiContextExecutor(conn)
         fw_conn_factory = lambda context: multi_exec.get_context(context)
@@ -397,7 +404,7 @@ def _get_hostname(conn):
     """
     Return the hostname of a device.
 
-    :param conn: An object that behaves like class:`CiscoSSHClient`.
+    :param conn: An object that behaves like :class:`CiscoSSHClient`.
     """
     return (yield from conn.exec_cmd('show hostname'))
 
@@ -406,7 +413,7 @@ def _is_multi_mode(conn):
     """
     Determine whether the device is in multiple context mode.
 
-    :param conn: An object that behaves like class:`CiscoSSHClient`.
+    :param conn: An object that behaves like :class:`CiscoSSHClient`.
 
     :return: True if the device is in multiple context mode; False otherwise.
     """
@@ -423,7 +430,7 @@ def _get_contexts(conn):
     """
     Retrieve a list of contexts from the device.
 
-    :param conn: An object that behaves like class:`CiscoSSHClient`.
+    :param conn: An object that behaves like :class:`CiscoSSHClient`.
 
     :return: A list of (context_name, is_admin_context) tuples.
     """
