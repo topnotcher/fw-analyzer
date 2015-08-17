@@ -1,7 +1,5 @@
 from time import mktime, strptime, strftime
 
-import pub
-
 class SyslogListener(object):
     def syslog_received(self, time, src, msg):
         raise NotImplementedError
@@ -11,6 +9,10 @@ class SyslogServer(object):
         self._bind = (bind_addr, bind_port)
         self._loop = None
         self._transport = None
+        self._listeners = []
+
+    def register_listener(self, listener):
+        self._listeners.append(listener)
 
     def start(self, loop):
         self._loop = loop
@@ -30,7 +32,8 @@ class SyslogServer(object):
             return
 
     def _dispatch_event(self, time, src, msg):
-        pub.publish('syslog', time=time, src=src, msg=msg)
+        for listener in self._listeners:
+            listener.syslog_received(time, src, msg)
 
     def _parse_log(self, log):
         pri, log = self._parse_pri(log)
@@ -76,14 +79,20 @@ class SyslogServer(object):
             self._transport.close()
 
 if __name__ == '__main__':
-    import asyncio
-    server = SyslogServer(bind_port=50514)
+    import sys, asyncio, logging
+    from .cisco.client import CiscoSSHClient
+    from .cisco.manager import CiscoFwManager
 
-    def receiver(src, time, msg):
-        print('Syslog Received: [%f](%s): %s' % (time, src, msg))
-
-    pub.subscribe('syslog', receiver)
+    logging.basicConfig(level=logging.DEBUG)
 
     loop = asyncio.get_event_loop()
+
+    server = SyslogServer(bind_port=50514)
     server.start(loop)
+
+    conn = CiscoSSHClient(sys.argv[1], sys.argv[2], sys.argv[3], loop)
+    manager = CiscoFwManager(conn, loop, None)
+
+    server.register_listener(manager)
+
     loop.run_forever()

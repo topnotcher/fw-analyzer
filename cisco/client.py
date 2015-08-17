@@ -93,6 +93,8 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         self._running = True
         self._task = self._loop.create_task(self._run())
 
+        self.log.info('Created connection for %s', host)
+
     @asyncio.coroutine
     def exec_cmd(self, cmd):
         """

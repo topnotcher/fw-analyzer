@@ -241,8 +241,8 @@ class _CiscoFwContextManager(object):
         """
         return ipaddr in self._ips
 
-    def handle_log_event(time, evt, msg):
-        pass
+    def handle_log_event(self, time, evt, msg):
+        self.log.debug('received log event %s: %s', evt, msg)
 
 class CiscoFwManager(SyslogListener):
     """
@@ -261,9 +261,10 @@ class CiscoFwManager(SyslogListener):
 
     @asyncio.coroutine
     def _initialize(self, conn):
-        contexts = enumerate_contexts(conn)
+        contexts = yield from enumerate_contexts(conn)
 
-        if len(self._contexts) > 1 or self._contexts[0].is_admin:
+        num = len(contexts)
+        if num > 1 or (num > 0 and contexts[0].is_admin):
             self._is_multi_context = True
         else:
             self._is_multi_context = False
@@ -305,7 +306,7 @@ class CiscoFwManager(SyslogListener):
         """
         result = re.match('^.*(?:ASA|FWSM)-([0-9]-[0-9]+): (.*)$', log)
         if result:
-            return result.group(2), result.group(3)
+            return result.group(1), result.group(2)
         else:
             return None
 
