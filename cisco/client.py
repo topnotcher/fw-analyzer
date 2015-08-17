@@ -89,7 +89,7 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         # Connection idle timeout (client side)
         self._timeout = 180
 
-        self.log = logging.getLogger(self.__class__.__name__)
+        self.log = logging.getLogger('%s(%s)' % (self.__class__.__name__, self._host))
         self._queue = asyncio.Queue(loop=self._loop)
         self._running = True
         self._task = self._loop.create_task(self._run())
