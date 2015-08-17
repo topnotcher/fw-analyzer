@@ -3,11 +3,16 @@ Utilities for managing Cisco ASAs in single or multiple context mode.
 
 In multiple context mode, all of the contexts can be managed by a single
 class:`CiscoFwManager` instance, which relies on a
-class:`_MultiContextExecutor` instance to ensure that context commands are
+class:`MultiContextExecutor` instance to ensure that context commands are
 executed in the appropriate context.
 """
 
-__ALL__ = ['CiscoFwManager']
+__ALL__ = [
+    'CiscoFwManager',
+    'CiscoFwContext',
+    'MultiContextExecutor',
+    'enumerate_contexts',
+]
 
 import asyncio
 import re
@@ -16,7 +21,7 @@ import logging
 from ..syslog import SyslogListener
 from .client import CiscoSSHClient
 
-class _CiscoFwContext(object):
+class CiscoFwContext(object):
     """
     A single Cisco firewall or firewall context: either a single context of a
     device in multiple context mode or a single device in single context mode.
@@ -36,24 +41,10 @@ class _CiscoFwContext(object):
         """
         self._name = name
         self._is_admin = is_admin
-        self._ips = []
         self._conn = conn
 
         if self._is_admin:
             self._sys_conn = sys_conn
-
-        log_name = '%s(%s)' % (self.__class__.__name__, self._name)
-        self.log = logging.getLogger(log_name)
-
-        #  NOTE: This does _not_ filter out addresses on down interfaces.
-        self.exec_cmd_callback('show run ip address', self._populate_ips)
-
-    def _populate_ips(self, show_ip):
-        """
-        Populate the list of IP addresses defined on this firewall.
-        """
-        self._ips = _parse_show_run_ip_addrs(show_ip)
-        self.log.info('Found IPs %s', ', '.join(self._ips))
 
     @asyncio.coroutine
     def exec_cmd(self, cmd):
@@ -63,7 +54,7 @@ class _CiscoFwContext(object):
         behaves the same way, but is a wrapper around
         _SingleContextExecutor.exec_cmd().
 
-        See class:`_MultiContextExecutor` and class:`_SingleContextExecutor`
+        See class:`MultiContextExecutor` and class:`_SingleContextExecutor`
         """
         return (yield from self._conn.exec_cmd(cmd))
 
@@ -74,7 +65,7 @@ class _CiscoFwContext(object):
         mode, it behaves the same way, but is a wrapper around
         _SingleContextExecutor.exec_cmd_callback().
 
-        See class:`_MultiContextExecutor` and class:`_SingleContextExecutor`
+        See class:`MultiContextExecutor` and class:`_SingleContextExecutor`
         """
         return self._conn.exec_cmd_callback(cmd, callback)
 
@@ -97,12 +88,6 @@ class _CiscoFwContext(object):
         else:
             return None
 
-    def has_ip(self, ipaddr):
-        """
-        Determine if this context has the given ip address.
-        """
-        return ipaddr in self._ips
-
     @property
     def name(self):
         """ Get the name of this context. """
@@ -113,22 +98,33 @@ class _CiscoFwContext(object):
         """ Determine if this is the admin context. """
         return self._is_admin
 
-class _MultiContextExecutor(object):
+class MultiContextExecutor(object):
     """
     A proxy to class:`CiscoSSHClient` that allows executing commands on a given
     context when the ASA is in multiple context mode.
 
-    For example: `config = foo.exec_cmd('admin', 'show run')` should _always_
-    return the running configuration of the `admin` context.
+    Example usage is as follows::
 
-    When this proxy is used, it is assumed that all commands executed on the
-    underlying CiscoSSHClient object are run through this proxy.
+        conn = CiscoSSHClient(host, user, pass)
+        multi_exec = MultiContextExecutor(conn)
+
+        admin = multi_exec.get_context('admin')
+        dmz = multi_exec.get_context('dmz')
+
+        dmz_running_config = yield from dmz.exec_cmd('show run')
+        admin_running_config = yield from admin.exec_cmd('show run')
+
+
+    When MultiContextExecutor is used, it is assumed that all commands executed
+    on the underlying class:`CiscoSSHClient` object are run through the
+    MultiContextExecutor instance. In particular, if changeto commands are run
+    outside of MultiContextExecutor, bad things happen.
 
     When meth:`exec_cmd` or meth:`exec_cmd_callback` is called  and the
-    requested context does not match the current context, a changeto context
-    command is sent before sending the actual command. It is thus crucial that
-    commands are executed in order. Synchronization is guaranteed by
-    CiscoSSHClient.
+    requested context does not match the context sent in the last changeto
+    command, a changeto context command is sent before sending the
+    actual command. It is thus crucial that commands are executed in order.
+    Synchronization is guaranteed by CiscoSSHClient.
     """
     def __init__(self, conn):
         self._conn = conn
@@ -167,22 +163,25 @@ class _MultiContextExecutor(object):
 
         return self._conn.exec_cmd_callback(cmd, callback)
 
+    def get_context(self, name):
+        return _SingleContextExecutor(name, self)
+
 class _SingleContextExecutor(object):
     """
-    A wrapper around class:`_MultiContextExecutor` that provides the same
+    A wrapper around class:`MultiContextExecutor` that provides the same
     interface as class:`CiscoSSHClient`. Users of this class do not care
     whether they are using a class:`CiscoSSHClient` or
     class:`_SingleContextExecutor` instance.
 
     When multiple instances of class:`_SingleContextExecutor` share the same
-    `_MultiContextExecutor` instance, class:`_MultiContextExecutor` guarantees
+    `MultiContextExecutor` instance, class:`MultiContextExecutor` guarantees
     that meth:`exec_cmd` or meth:`exec_cmd_callback` calls on the
     `_SingleContextExecutor` instance are run on the correct context.
     """
     def __init__(self, context, conn):
         """
         :param string context: The name of the context.
-        :param _MultiContextExecutor conn: A _MultiContextExecutor instance
+        :param MultiContextExecutor conn: A MultiContextExecutor instance
         shared by multiple _SingleContextExecutor instances.
         """
         self._conn = conn
@@ -210,15 +209,38 @@ class _SingleContextExecutor(object):
         """
         return self._conn.exec_cmd_callback(self._context, cmd, callback)
 
+class _CiscoFwContextManager(object):
+
+    def __init__(self, context):
+        self._context = context
+        self._ips = []
+
+        log_name = '%s(%s)' % (self.__class__.__name__, self._context.name)
+        self.log = logging.getLogger(log_name)
+
+        #  NOTE: This does _not_ filter out addresses on down interfaces.
+        self._context.exec_cmd_callback('show run ip address', self._populate_ips)
+
+    def _populate_ips(self, show_ip):
+        """
+        Populate the list of IP addresses defined on this firewall.
+        """
+        self._ips = _parse_show_run_ip_addrs(show_ip)
+        self.log.info('Found IPs %s', ', '.join(self._ips))
+
+    def has_ip(self, ipaddr):
+        """
+        Determine if this context has the given ip address.
+        """
+        return ipaddr in self._ips
+
+    def handle_log_event(time, evt, msg):
+        pass
+
 class CiscoFwManager(SyslogListener):
     """
     Main class for FW management: determines firewall mode, enumerates
     contexts, etc.
-
-    conn = CiscoSSHClient(host, user, pass)
-    fw = CiscoFwManager(conn, asyncio.get_event_loop())
-    for context in (yield from fw.contexts):
-        print(context.exec_cmd('show run'))
     """
     def __init__(self, conn, loop, config):
         self._loop = loop
@@ -226,83 +248,30 @@ class CiscoFwManager(SyslogListener):
 
         self._contexts = []
         self._is_multi_context = False
-        self._admin_context = None
 
         self.log = logging.getLogger(self.__class__.__name__)
-        self._client = conn
-        self._loop.create_task(self._initialize())
+        self._loop.create_task(self._initialize(conn))
 
     @asyncio.coroutine
-    def _initialize(self):
-        """
-        Initialize the class:`CiscoFwManager` instance:
+    def _initialize(self, conn):
+        contexts = enumerate_contexts(conn)
 
-        1. Determine if the firewall is in multiple or single context mode.
-            - Or if it is in multiple context mode, but we're connecting to a
-              single context, treat it like single context mode.
-        2. Instantiate a class:`_CiscoFwContext` object for each context.
-            - In multiple context mode, each context gets a
-              class:`_SingleContextExecutor` instance to allow executing
-              commands on the proper context.
-            - Each class:`_CiscoFwContext` instance gathers a list of its IP
-              addresses so we can filter syslogs to the correct context.
-
-        TODO: creation and deletion of contexts is not yet supported
-        """
-        is_multi = yield from _is_multi_mode(self._client)
-
-        # If it reports that it is in multiple context mode, we want to know
-        # whether we're in the admin context. If we are not in the admin
-        # context, we can just treat it like single context mode.
-        if is_multi:
-            self.log.info('Cisco ASA in multiple context mode.')
-
-            contexts = yield from _get_contexts(self._client)
-            if contexts and contexts[0][1]:
-                self._is_multi_context = True
-            else:
-                self._is_multi_context = False
-                self.log.info('Falling back to single context!')
+        if len(self._contexts) > 1 or self._contexts[0].is_admin:
+            self._is_multi_context = True
         else:
-            self.log.info('Cisco ASA in single context mode.')
             self._is_multi_context = False
 
-        if not self._is_multi_context:
-            hostname = yield from _get_hostname(self._client)
-            contexts = [(hostname, False)]
-
-            # In single mode, just pass through the class:`CiscoSSHClient` instance.
-            fw_conn_factory = lambda context: self._client
-        else:
-            yield from self._client.exec_cmd('changeto context system')
-            contexts = yield from _get_contexts(self._client)
-
-            # In multiple context mode, pass each class:`_CiscoFwContext`
-            # instance a class:`_SingleContextExecutor` instance that makes it
-            # think it is running in single context mode.
-            multi_exec = _MultiContextExecutor(self._client)
-            fw_conn_factory = lambda context: _SingleContextExecutor(context, multi_exec)
-
-        for name, is_admin in contexts:
-            # A bit of a hack: Since any syslogs from the system actually come
-            # from the admin context, the admin context becomes responsible for
-            # the system context.
-            if is_admin:
-                context = _CiscoFwContext(name, fw_conn_factory(name), True, fw_conn_factory('system'))
-            else:
-                context = _CiscoFwContext(name, fw_conn_factory(name), False)
-
-            self.log.info('Context: %s; is_admin=%s', context.name, str(context.is_admin))
-
-            self._contexts.append(context)
+        for context in contexts:
+            context_mgr = _CiscoFwContextManager(context)
+            self._contexts.append(context_mgr)
 
         self._initialized.set()
 
     @property
     @asyncio.coroutine
     def contexts(self):
-        """ 
-        Return a list of class:`_CiscoFwContext` instances.
+        """
+        Return a list of class:`CiscoFwContext` instances.
         """
         yield from self._initialized.wait()
         return self._contexts
@@ -311,26 +280,12 @@ class CiscoFwManager(SyslogListener):
         """
         Handle syslog received events from the SyslogServer.
         """
-        if self._check_log_src(src) and self._initialized.is_set():
-            parsed = self._parse_log(msg.decode('ascii'))
-            if parsed:
-                self._handle_log_event(time, src.decode('ascii'), parsed[0], parsed[1])
-
-    def _handle_log_event(self, time, src, evt, msg):
-        """
-        Handle a syslog event?
-        """
-        pass
-
-    def _check_log_src(self, src):
-        """
-        Check if a syslog source address belongs to a context managed by this instance.
-        """
-        for context in self._contexts:
-            if src in self._contexts[context]:
-                return True
-
-        return False
+        if self._initialized.is_set():
+            for context in self._contexts:
+                if context.has_ip(src.decode('ascii')):
+                    parsed = self._parse_log(msg.decode('ascii'))
+                    if parsed:
+                        context.handle_log_event(time, parsed[0], parsed[1])
 
     @staticmethod
     def _parse_log(log):
@@ -358,6 +313,84 @@ def _parse_show_run_ip_addrs(show_ip):
             ips.append(result.group(1))
 
     return ips
+
+@asyncio.coroutine
+def enumerate_contexts(conn):
+    """
+    A convenience function for managing firewalls in multi context mode. A list
+    of class:`CiscoFwContext` instances is returned with one instance for each
+    context. If the firewall is in multiple context mode, the list contains one
+    entry.
+
+    For example, to connect to some arbitrary firewall (single or multiple
+    context) and retrieve all context configs::
+
+        conn = CiscoSSHClient(host, user, pass, loop)
+        for context in (yield from enumerate_contexts(conn)):
+            context_config = context.exec_cmd('show run')
+
+    See class:`MultiContextExecutor`.
+
+    1. Determine if the firewall is in multiple or single context mode.
+        - Or if it is in multiple context mode, but we're connecting to a
+          single context, treat it like single context mode.
+    2. Instantiate a class:`CiscoFwContext` object for each context.
+        - In multiple context mode, each context gets a
+          class:`_SingleContextExecutor` instance to allow executing
+          commands on the proper context.
+        - Each class:`CiscoFwContext` instance gathers a list of its IP
+          addresses so we can filter syslogs to the correct context.
+    """
+    log = logging.getLogger('enumerate_contexts')
+    is_multi = False
+
+    # If it reports that it is in multiple context mode, we want to know
+    # whether we're in the admin context. If we are not in the admin
+    # context, we can just treat it like single context mode.
+    if (yield from _is_multi_mode(conn)):
+        log.info('Cisco ASA in multiple context mode.')
+
+        contexts = yield from _get_contexts(conn)
+        if contexts and contexts[0][1]:
+            is_multi = True
+        else:
+            is_multi = False
+            log.info('Falling back to single context!')
+    else:
+        log.info('Cisco ASA in single context mode.')
+        is_multi = False
+
+    if not is_multi:
+        hostname = yield from _get_hostname(conn)
+        contexts = [(hostname, False)]
+
+        # In single mode, just pass through the class:`CiscoSSHClient` instance.
+        fw_conn_factory = lambda context: conn
+    else:
+        yield from conn.exec_cmd('changeto context system')
+        contexts = yield from _get_contexts(conn)
+
+        # In multiple context mode, pass each class:`CiscoFwContext`
+        # instance a class:`_SingleContextExecutor` instance that makes it
+        # think it is running in single context mode.
+        multi_exec = MultiContextExecutor(conn)
+        fw_conn_factory = lambda context: multi_exec.get_context(context)
+
+    context_objs = []
+    for name, is_admin in contexts:
+        # A bit of a hack: Since any syslogs from the system actually come
+        # from the admin context, the admin context becomes responsible for
+        # the system context.
+        if is_admin:
+            context = CiscoFwContext(name, fw_conn_factory(name), True, fw_conn_factory('system'))
+        else:
+            context = CiscoFwContext(name, fw_conn_factory(name), False)
+
+        log.info('Context: %s; is_admin=%s', context.name, str(context.is_admin))
+
+        context_objs.append(context)
+
+    return context_objs
 
 @asyncio.coroutine
 def _get_hostname(conn):
@@ -405,17 +438,16 @@ def _get_contexts(conn):
 
     return contexts
 
-
 @asyncio.coroutine
-def _test_save_all_configs(manager, loop):
+def _test_save_all_configs(conn, loop):
     """
     Test running show run and saving configuration on all contexts.
     """
     from concurrent.futures import ThreadPoolExecutor
-
     executor = ThreadPoolExecutor(1)
 
-    for context in (yield from manager.contexts):
+    contexts = yield from enumerate_contexts(conn)
+    for context in contexts:
         # Ten levels of ugly
         def save_context_config(context_name):
             """ so many """
@@ -444,9 +476,8 @@ def main():
     loop = asyncio.get_event_loop()
 
     conn = CiscoSSHClient(sys.argv[1], sys.argv[2], sys.argv[3], loop)
-    manager = CiscoFwManager(conn, loop, None)
 
-    loop.create_task(_test_save_all_configs(manager, loop))
+    loop.create_task(_test_save_all_configs(conn, loop))
     loop.run_forever()
 
 if __name__ == '__main__':
