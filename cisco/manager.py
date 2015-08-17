@@ -20,7 +20,6 @@ import logging
 
 from ..syslog import SyslogListener
 from .client import CiscoSSHClient
-from .config import ConfigManager
 
 class CiscoFwContext(object):
     """
@@ -280,15 +279,46 @@ class CiscoFwManager(SyslogListener):
         else:
             self._is_multi_context = False
 
-        for context in contexts:
-            context_mgr = _CiscoFwContextManager(context)
-            self._contexts.append(context_mgr)
+        # TODO: hard-coded
+        plugin_classes = [
+            'fwflow.cisco.config.ConfigManager',
+            'fwflow.cisco.flows.FlowAnalyzer',
+        ]
+        plugins = self._load_plugins(plugin_classes)
 
-        # @TODO
-        for context_mgr in self._contexts:
-            context_mgr.add_plugin(ConfigManager)
+        for context in contexts:
+            try:
+                self._init_context(context, plugins)
+            except Exception as err:
+                self.log.error('Error initializing _CisoFwContextManager(%s).', context.name)
+                self.log.exception(err)
 
         self._initialized.set()
+
+    def _init_context(self, context, plugins):
+        context_mgr = _CiscoFwContextManager(context)
+        self._contexts.append(context_mgr)
+
+        # initialize plugins for context manager
+        for name in plugins:
+            try:
+                context_mgr.add_plugin(plugins[name])
+            except Exception as err:
+                self.log.error('Error initializing plugin class "%s".', name)
+                self.log.exception(err)
+
+    def _load_plugins(self, plugin_classes):
+        plugins = map(_load_class, plugin_classes)
+        loaded_plugins = {}
+
+        for name, cls in plugins:
+            if not cls:
+                self.log.error('Could not find plugin class "%s".', name)
+            else:
+                self.log.info('Loaded plugin class: "%s".', name)
+                loaded_plugins[name] = cls
+
+        return loaded_plugins
 
     @property
     @asyncio.coroutine
@@ -461,6 +491,24 @@ def _get_contexts(conn):
             contexts.append((result.group(2), is_admin))
 
     return contexts
+
+def _load_class(name):
+    path = name.split('.')
+    cls = None
+    try:
+        mod = __import__('.'.join(path[:-1]))
+        for attr in path[1:]:
+            if hasattr(mod, attr):
+                mod = getattr(mod, attr)
+                cls = mod
+            else:
+                cls = None
+                break
+    except ImportError:
+        pass
+
+    return (name, cls)
+
 
 @asyncio.coroutine
 def _test_save_all_configs(conn, loop):
