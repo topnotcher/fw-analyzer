@@ -37,9 +37,10 @@ class _FutureCommand(asyncio.Future):
         """
         Called when the future is done.
         """
-        argspec = inspect.getargspec(self._cmd_done_callback)
+        arglen = len(inspect.getargspec(self._cmd_done_callback))
         is_method = inspect.ismethod(self._cmd_done_callback)
-        if len(argspec.args) == 2 and not is_method:
+        if (arglen == 3 and is_method or
+            arglen == 2 and not is_method):
             args = (self.cmd, future.result())
         else:
             args = (future.result(),)
@@ -129,6 +130,8 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         self._stdin = None
         self._stdout = None
         self._conn = None
+
+        self.log.info('disconnected')
 
     def close(self):
         """
