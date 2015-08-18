@@ -8,12 +8,21 @@ from hashlib import md5
 __ALL__ = ['ConfigManager']
 
 class _NullFileDiff(object):
+    """
+    Represents a diff (or not) to a file. If there is no diff, self._diff is
+    None. The diff can be committed to some storage backend with self.commit
+
+    For testing only: This does not do anything.
+
+    I don't even know what a diff object would actually be if there were
+    actually diff objects. Perplexing.
+    """
     def __init__(self, commit_cb, diff):
         self._commit = commit_cb
         self._diff = diff
 
-    def commit(self, msg):
-        self._commit(msg)
+    def commit(self, user, email,  msg):
+        self._commit(user, email,  msg)
 
     @property
     def diff(self):
@@ -37,13 +46,13 @@ class _NullFileStore(object):
         # TODO: if I didn't decode in SSH Client...
         self._hash = md5(content.encode('utf8'))
 
-        commit_callback = lambda msg: self.commit(file_name, msg)
+        commit_callback = lambda user, email, msg: self.commit(file_name, user, email, msg)
         file_diff = True if self._hash != oldhash else None
         diff = _NullFileDiff(commit_callback, file_diff)
 
         callback(diff)
 
-    def commit(self, name, msg):
+    def commit(self, file_name, user, msg):
         pass
 
 class _ManagedConfig(object):
@@ -119,20 +128,22 @@ class _ManagedConfig(object):
             return None, None
 
 class ConfigManager(object):
-    def __init__(self, manager, context):
+    def __init__(self, manager, context, **kwargs):
         self._context = context
         self._manager = manager
         self._changes = []
         self._flushed_changes = []
 
+        store = kwargs.get('store', None)
+
         log_name = '%s(%s)' % (self.__class__.__name__, self._context.name)
         self.log = logging.getLogger(log_name)
 
-        self._configs = [_ManagedConfig(self, context, None)]
+        self._configs = [_ManagedConfig(self, context, store)]
 
         # This is somewhat dirty...
         if self._context.is_admin and self._context.sys_conn:
-            self._configs.append(_ManagedConfig(self, self._context.sys_conn, None))
+            self._configs.append(_ManagedConfig(self, self._context.sys_conn, store))
 
         self._manager.subscribe(manager.LOG_EVENT, '5-111008', self._cmd_run_event)
         self.check_config()
@@ -141,17 +152,17 @@ class ConfigManager(object):
         self.log.debug('Config updated')
 
         # @TODO: could publish another event for commit and include a diff...
-        msg = self._get_commit_msg()
+        user, email, msg = self._get_commit_log()
         self.log.debug('Committing changes: %s', msg)
 
-        diff.commit(msg)
+        diff.commit(user, email, msg)
         self._manager.publish(self._manager.CONFIG_EVENT, 'updated')
 
     def check_config(self):
         for config in self._configs:
             config.check()
 
-    def _get_commit_msg(self):
+    def _get_commit_log(self):
         users = set()
         changes = []
 
@@ -167,7 +178,15 @@ class ConfigManager(object):
         #       - Which we can now do given config_updated() receives some kind of diffy object
         hdr = 'Changes to %s by %s' % (self._context.name, ', '.join(users))
 
-        return hdr + (os.linesep*2) + os.linesep.join(changes)
+        # TODO: user name nad email need to be looked up... :
+        if users:
+            user = users.pop()
+            email = '%s@foo.bar' % user
+        else:
+            user = 'backup'
+            email = 'backup@foo.bar'
+
+        return user, email, (hdr + (os.linesep*2) + os.linesep.join(changes))
 
     def _cmd_run_event(self, cmd_time, msg):
         IGNORED_USERS = ['failover']

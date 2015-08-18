@@ -20,6 +20,7 @@ import logging
 
 from ..syslog import SyslogListener
 from .client import CiscoSSHClient
+from ..util.git import GitFileStore
 
 class CiscoFwContext(object):
     """
@@ -230,8 +231,8 @@ class _CiscoFwContextManager(object):
             if sub_topic == topic and sub_evt == evt:
                 sub_cb(*args, **kwargs)
 
-    def add_plugin(self, plugin_class):
-        ins = plugin_class(self, self._context)
+    def add_plugin(self, plugin_class, **kwargs):
+        ins = plugin_class(self, self._context, **kwargs)
 
     def _populate_ips(self, show_ip):
         """
@@ -275,30 +276,33 @@ class CiscoFwManager(SyslogListener):
         else:
             self._is_multi_context = False
 
+        store = GitFileStore(self._loop, '/home/mario/dev/fwflow/test_repo', push='origin master')
+
         # TODO: hard-coded
-        plugin_classes = [
-            'fwflow.cisco.config.ConfigManager',
-            'fwflow.cisco.flows.FlowAnalyzer',
-        ]
+        plugin_classes = {
+            'fwflow.cisco.config.ConfigManager': {'store': store},
+            'fwflow.cisco.flows.FlowAnalyzer': {},
+        }
         plugins = self._load_plugins(plugin_classes)
 
         for context in contexts:
             try:
-                self._init_context(context, plugins)
+                self._init_context(context, plugins, plugin_classes)
             except Exception as err:
                 self.log.error('Error initializing _CisoFwContextManager(%s).', context.name)
                 self.log.exception(err)
 
         self._initialized.set()
 
-    def _init_context(self, context, plugins):
+    def _init_context(self, context, plugins, args):
         context_mgr = _CiscoFwContextManager(context)
         self._contexts.append(context_mgr)
 
         # initialize plugins for context manager
         for name in plugins:
             try:
-                context_mgr.add_plugin(plugins[name])
+                kwargs = args[name]
+                context_mgr.add_plugin(plugins[name], **kwargs)
             except Exception as err:
                 self.log.error('Error initializing plugin class "%s".', name)
                 self.log.exception(err)
