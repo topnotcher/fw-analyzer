@@ -345,8 +345,6 @@ class CiscoFwManager(SyslogListener):
         """
         Parse a Cisco log message into the event ID and the message.
 
-        Assumtion: first part of the log is context/hostname.
-
         :return: None if the log is not pareable; else (evt, msg)
         """
         result = re.match('^.*(?:ASA|FWSM)-([0-9]-[0-9]+): (.*)$', log)
@@ -370,29 +368,36 @@ def _parse_show_run_ip_addrs(show_ip):
 @asyncio.coroutine
 def enumerate_contexts(conn):
     """
-    A convenience function for managing firewalls in multi context mode. A list
-    of :class:`CiscoFwContext` instances is returned with one instance for each
-    context. If the firewall is in multiple context mode, the list contains one
-    entry.
+    A convenience function for managing firewalls that may be in multiple
+    context mode. A list of :class:`CiscoFwContext` instances is returned with
+    one instance for each context. If the firewall is in single context mode,
+    the list contains one entry.
 
-    ..seealso:: :class:`MultiContextExecutor`.
+    ..seealso::
+        :class:`MultiContextExecutor`.
+        :class:`_SingleContextExecutor`.
+        :class:`CiscoFwContext`.
 
-    For example, to connect to some arbitrary firewall (single or multiple
+    To connect to some arbitrary firewall (single or multiple
     context) and retrieve all context configs::
 
         conn = CiscoSSHClient(host, user, pass, loop)
         for context in (yield from enumerate_contexts(conn)):
-            context_config = context.exec_cmd('show run')
+            context_config = yield from context.exec_cmd('show run')
+
+    Steps run are as follows:
 
     1. Determine if the firewall is in multiple or single context mode.
-        - Or if it is in multiple context mode, but we're connecting to a
-          single context, treat it like single context mode.
+        - Or if it is in multiple context mode, but the connection is to a
+          non-admin context, treat it like single context mode.
     2. Instantiate a :class:`CiscoFwContext` object for each context.
         - In multiple context mode, each context gets a
-          :class:`_SingleContextExecutor` instance to allow executing
-          commands on the proper context.
-        - Each :class:`CiscoFwContext` instance gathers a list of its IP
-          addresses so we can filter syslogs to the correct context.
+          :class:`_SingleContextExecutor` instance to allow executing commands
+          on the proper context.
+
+
+    :param conn: A CiscoSSHClient instance.
+    :return: A list of :class:`CiscoFwContext` instances.
     """
     log = logging.getLogger('enumerate_contexts')
     is_multi = False
