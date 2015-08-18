@@ -3,13 +3,14 @@ import re
 
 class ACL(object):
     def __init__(self, name):
+        self.name = name
         self.rules = []
 
     def add_ace(self, ace):
         self.rules.append(ace)
 
     def __str__(self):
-        st = 'Access list: %s\n'
+        st = 'Access list: %s\n' % self.name
 
         for rule in self.rules:
             st += str(rule) + '\n'
@@ -180,7 +181,7 @@ class ACELineParser(object):
     def _consume_line_number(self):
         self.populate('line', int(self.toks.pop(0)))
 
-    @require_next_tok('extended', 'remark')
+    @require_next_tok('standard', 'extended', 'remark')
     @require_not_populated('type')
     def _consume_type(self):
         self.populate('type', self.toks.pop(0))
@@ -196,6 +197,9 @@ class ACELineParser(object):
     @require_not_populated('ip_proto')
     @require_prev_field('action')
     def _consume_ip_proto(self):
+        if self.data['type'] == 'standard':
+            return
+
         next_tok = self.toks.pop(0)
 
         if next_tok in ('object-group', 'object'):
@@ -204,6 +208,11 @@ class ACELineParser(object):
             proto = next_tok
 
         self.populate('ip_proto', proto)
+
+    @require_prev_field('action')
+    def _consume_std_dst(self):
+        if self.data['type'] == 'standard':
+            self.populate('dst', self._try_consume_src_dst(self.toks))
 
     @require_prev_field('ip_proto')
     def _consume_src_dst(self):
@@ -279,7 +288,8 @@ class ACELineParser(object):
             toks.pop(0)
             target[next_tok] = toks.pop(0)
 
-        elif next_tok == 'any':
+        # @TODO
+        elif next_tok in ('any', 'any4', 'any6'):
             toks.pop(0)
             target['any'] = True
 
@@ -315,22 +325,27 @@ class ACELineParser(object):
     def _consume_log(self):
         next_tok = self.toks[0]
 
-        if next_tok in ('emergencies', 'informational', 'disable', 'errors', 'alerts', 'debugging') or next_tok.isdigit():
+        if next_tok in ('emergencies', 'warnings', 'informational', 'disable', 'errors', 'alerts', 'debugging') or next_tok.isdigit():
             self.toks.pop(0)
 
+        next_tok = self.toks[0]
         if next_tok == 'interval':
             self.toks.pop(0)
             self.toks.pop(0)
 
-    @consume_next_tok('inactive')
-    def _consume_disable(self):
+    @consume_next_tok('inactive', '(inactive)')
+    def _consume_inactive(self):
         self.populate('inactive', True)
 
     def _consume_hitcnt(self):
         next_tok = self.toks[0]
         if re.match('\(hitcnt=[0-9]+\)', next_tok):
-            self.toks.pop(0) # hitcnt
-            self.toks.pop(0) #hash
+            self.toks.pop(0)
+
+    def _consume_hash(self):
+        next_tok = self.toks[0]
+        if re.match('0x[a-f0-9]+', next_tok):
+            self.populate('hash', self.toks.pop(0))
 
 
 class ACLParser(object):
@@ -358,7 +373,7 @@ class ACLParser(object):
         data = {}
         data = parser.parse()
 
-        if data['type'] == 'extended':
+        if data['type'] != 'remark':
             self.consumed_elements += 1
 
         if level == 0:
@@ -379,7 +394,12 @@ def parse_file(file_name):
 
     acls = []
     for line in fh:
-        name, acl_elements = parse_hdr(line)
+        try:
+            name, acl_elements = parse_hdr(line)
+        #   1 access-list cached ACL log flows: total 0, denied 0 (deny-flow-max 4096) alert-interval 300
+        except ValueError:
+            continue
+
         parser = ACLParser(name, acl_elements)
         acl = parser.consume(fh)
         acls.append(acl)
@@ -390,4 +410,4 @@ def parse_file(file_name):
         print(acl)
 
 if __name__ == '__main__':
-    parse_file('data/acl.txt')
+    parse_file('../data/acl.txt')
