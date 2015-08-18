@@ -67,7 +67,7 @@ class SyslogServer(object):
         year = strftime('%Y')
         time_str = log[:15].decode('ascii').replace('  ', ' 0') + ' ' + year
         s_time = strptime(time_str, '%b %d %H:%M:%S %Y')
-        return mktime(s_time), log[16:]
+        return s_time, log[16:]
 
     @staticmethod
     def _parse_src(log):
