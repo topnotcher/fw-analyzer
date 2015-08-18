@@ -225,14 +225,10 @@ class _CiscoFwContextManager(object):
         sub = (topic, evt, callback)
         self._subscribers.append(sub)
 
-    def publish(self, topic, evt, data=None):
+    def publish(self, topic, evt, *args, **kwargs):
         for sub_topic, sub_evt, sub_cb in self._subscribers:
             if sub_topic == topic and sub_evt == evt:
-
-                if data:
-                    sub_cb(data)
-                else:
-                    sub_cb()
+                sub_cb(*args, **kwargs)
 
     def add_plugin(self, plugin_class):
         ins = plugin_class(self, self._context)
@@ -252,7 +248,7 @@ class _CiscoFwContextManager(object):
 
     def handle_log_event(self, time, evt, msg):
         self.log.debug('received log event %s: %s', evt, msg)
-        self.publish(self.LOG_EVENT, evt, msg)
+        self.publish(self.LOG_EVENT, evt, time, msg)
 
 class CiscoFwManager(SyslogListener):
     """
