@@ -152,7 +152,7 @@ class ConfigManager(object):
         self.log.debug('Config updated')
 
         # @TODO: could publish another event for commit and include a diff...
-        user, email, msg = self._get_commit_log()
+        user, email, msg = self._get_commit_log(diff)
         self.log.debug('Committing changes: %s', msg)
 
         diff.commit(user, email, msg)
@@ -162,9 +162,24 @@ class ConfigManager(object):
         for config in self._configs:
             config.check()
 
-    def _get_commit_log(self):
+    def _get_commit_log(self, diff):
         users = set()
         changes = []
+
+        # TODO: ISSUE FUCKING TAGGING???????????????????????
+        # TODO: this is horribly done!
+        tag_strs = ('CR-[0-9]+',)
+        tags = set()
+
+        for line in diff.diff.splitlines():
+            for tag in tag_strs:
+                result = re.match('.*(%s)' % tag, line)
+                if result:
+                    tags.add(result.group(1))
+        if tags:
+            tag_str = ', '.join(tags) + ' '
+        else:
+            tag_str = ''
 
         for cmd_time, user, cmd in self._flushed_changes:
             tm = time.strftime('%Y-%m-%d %H:%M:%S %Z', cmd_time)
@@ -174,9 +189,7 @@ class ConfigManager(object):
         self._flushed_changes = []
 
         # TODO: for system context, "Changes to ____" is wrong.
-        # TODO: ISSUE FUCKING TAGGING???????????????????????
-        #       - Which we can now do given config_updated() receives some kind of diffy object
-        hdr = 'Changes to %s by %s' % (self._context.name, ', '.join(users))
+        hdr = '%sChanges to %s by %s' % (tag_str, self._context.name, ', '.join(users))
 
         # TODO: user name nad email need to be looked up... :
         if users:
