@@ -42,17 +42,23 @@ class _GitRepoRequest(object):
         self._store.loop.call_soon_threadsafe(callback, *args)
 
 class _GitRepoCommitRequest(_GitRepoRequest):
-    def __init__(self, store, actor, file_name, msg):
+    def __init__(self, store, actor, file_name, msg, push):
         super(_GitRepoCommitRequest, self).__init__(store)
 
         self._actor = actor
         self._file_name = file_name
         self._msg = msg
+        self._push = push
 
     def service(self, repo):
         file_path = os.path.join(repo.working_tree_dir, self._file_name)
-        repo.index.add([file_path])
         repo.index.commit(author=self._actor, committer=self._actor, message=self._msg)
+
+        if self._push:
+            r_name, branch = self._push.split(' ')
+            remote = getattr(remo.remotes, r_name)
+            src_branch = repo.active_branch.name
+            remote.push('%s:refs/heads/%s' % (src_branch, branch))
 
 class _GitRepoUpdateRequest(_GitRepoRequest):
     def __init__(self, store, file_name, content, callback):
@@ -69,12 +75,21 @@ class _GitRepoUpdateRequest(_GitRepoRequest):
         with open(file_path, 'w', encoding='utf8') as fh:
             fh.write(self._content)
 
+        repo.index.add([file_path])
+
         # 2. TODO: Get a diff of the file.
         commit_cb = lambda user, email, msg: self._store.commit(user, email, self._file_name, msg)
-        diff = _NullFileDiff(commit_cb, True)
+
+        diffs = repo.index.diff('HEAD', file_path, create_patch=True)
+        if diffs and diffs[0]:
+            diff = diffs[0].diff.decode('utf8')
+        else:
+             diff = None
+
+        diff_obj = _NullFileDiff(commit_cb, diff)
 
         # 3. Send the diff!
-        self.run_callback(self._callback, diff)
+        self.run_callback(self._callback, diff_obj)
 
 class _GitWorkerStopRequest(_GitRepoRequest):
     def __init__(self, worker):
@@ -84,7 +99,7 @@ class _GitWorkerStopRequest(_GitRepoRequest):
         self._worker.cancel()
 
 class _GitRepoWorker(threading.Thread):
-    def __init__(self, path, push=None):
+    def __init__(self, path):
         super(_GitRepoWorker, self).__init__(name=self.__class__.__name__)
 
         self.log = logging.getLogger(self.__class__.__name__)
@@ -100,7 +115,10 @@ class _GitRepoWorker(threading.Thread):
     def run(self):
         while self._running.is_set():
            request = self._queue.get()
-           request.service(self._repo)
+           try:
+               request.service(self._repo)
+            except Exception as err:
+                self.log.exception(err)
 
     def put(self, req):
         self._queue.put(req)
@@ -125,7 +143,8 @@ class GitFileStore(object):
     event loop.
     """
     def __init__(self, loop, path, push=None):
-        self._worker = _GitRepoWorker(path, push)
+        self._worker = _GitRepoWorker(path)
+        self._push = push
         self._loop = loop
         self._worker.start()
 
@@ -154,5 +173,5 @@ class GitFileStore(object):
         :param msg: The commit message.
         """
         actor = git.Actor(user, email)
-        req = _GitRepoCommitRequest(self, actor, file_name, msg)
+        req = _GitRepoCommitRequest(self, actor, file_name, msg, self._push)
         self._worker.put(req)
