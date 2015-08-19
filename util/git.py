@@ -76,9 +76,16 @@ class _GitRepoUpdateRequest(_GitRepoRequest):
         # 3. Send the diff!
         self.run_callback(self._callback, diff)
 
+class _GitWorkerStopRequest(_GitRepoRequest):
+    def __init__(self, worker):
+        self._worker = worker
+
+    def service(self, repo): # pylint: disable=unused-arguments
+        self._worker.cancel()
+
 class _GitRepoWorker(threading.Thread):
     def __init__(self, path, push=None):
-        super(_GitRepoWorker, self).__init__()
+        super(_GitRepoWorker, self).__init__(name=self.__class__.__name__)
 
         self.log = logging.getLogger(self.__class__.__name__)
         
@@ -86,11 +93,12 @@ class _GitRepoWorker(threading.Thread):
         self._repo = git.Repo(path)
         assert not self._repo.bare
 
-        self._running = True
         self._queue = queue.Queue()
+        self._running = threading.Event()
+        self._running.set()
     
     def run(self):
-        while self._running:
+        while self._running.is_set():
             self._work()
 
     def _work(self):
@@ -99,6 +107,19 @@ class _GitRepoWorker(threading.Thread):
 
     def put(self, req):
         self._queue.put(req)
+
+    # TODO: use this!
+    def stop(self):
+        # This will be the last request processed. All queued requests before
+        # stop() will be processed()
+        self.put(_GitWorkerStopRequest(self))
+        self._worker.join()
+
+    # Since the worker thread will be blocking on the Queue,
+    # this will not cancel it until the next request is serviced.
+    def cancel(self):
+        self._running.clear()
+
 
 class GitFileStore(object):
     def __init__(self, loop, path, push=None):
