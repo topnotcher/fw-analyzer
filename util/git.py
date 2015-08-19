@@ -52,7 +52,7 @@ class _GitRepoCommitRequest(_GitRepoRequest):
     def service(self, repo):
         file_path = os.path.join(repo.working_tree_dir, self._file_name)
         repo.index.add([file_path])
-        repo.index.commit(author=self._actor, committer=self._actor, message=self._msg) 
+        repo.index.commit(author=self._actor, committer=self._actor, message=self._msg)
 
 class _GitRepoUpdateRequest(_GitRepoRequest):
     def __init__(self, store, file_name, content, callback):
@@ -88,7 +88,7 @@ class _GitRepoWorker(threading.Thread):
         super(_GitRepoWorker, self).__init__(name=self.__class__.__name__)
 
         self.log = logging.getLogger(self.__class__.__name__)
-        
+
         # This is probably going to block, but ehh it's init. Shush.
         self._repo = git.Repo(path)
         assert not self._repo.bare
@@ -96,13 +96,13 @@ class _GitRepoWorker(threading.Thread):
         self._queue = queue.Queue()
         self._running = threading.Event()
         self._running.set()
-    
+
     def run(self):
         while self._running.is_set():
             self._work()
 
     def _work(self):
-       request = self._queue.get()     
+       request = self._queue.get()
        request.service(self._repo)
 
     def put(self, req):
@@ -122,6 +122,11 @@ class _GitRepoWorker(threading.Thread):
 
 
 class GitFileStore(object):
+    """
+    A very non-generalized limited use case helper for running some git
+    operations in another thread so that they can be performed from an asyncio
+    event loop.
+    """
     def __init__(self, loop, path, push=None):
         self._worker = _GitRepoWorker(path, push)
         self._loop = loop
@@ -137,7 +142,7 @@ class GitFileStore(object):
         """
         req = _GitRepoUpdateRequest(self, file_name, content, callback)
         self._worker.put(req)
-    
+
     @property
     def loop(self):
         return self._loop
