@@ -99,11 +99,8 @@ class _GitRepoWorker(threading.Thread):
 
     def run(self):
         while self._running.is_set():
-            self._work()
-
-    def _work(self):
-       request = self._queue.get()
-       request.service(self._repo)
+           request = self._queue.get()
+           request.service(self._repo)
 
     def put(self, req):
         self._queue.put(req)
