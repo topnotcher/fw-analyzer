@@ -10,6 +10,10 @@ class FlowAnalyzer(object):
         self._manager.subscribe(self._manager.CONFIG_EVENT, 'updated', self._get_acls)
         self._manager.subscribe(self._manager.LOG_EVENT, '6-106100', self._acl_entry_hit)
 
+        # This gets the ACLs on startup
+        # NOTE: If the config is different than the saved config, we'll pull
+        # the ACL's twice: once now and once when the 'config updated' event is
+        # received.
         self._get_acls()
 
     def _get_acls(self):
