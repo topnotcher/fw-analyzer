@@ -209,8 +209,9 @@ class _CiscoFwContextManager(object):
     LOG_EVENT = 1
     CONFIG_EVENT = 2
 
-    def __init__(self, context):
+    def __init__(self, context, loop):
         self._context = context
+        self._loop = loop
         self._ips = []
         self._plugins = []
 
@@ -221,6 +222,10 @@ class _CiscoFwContextManager(object):
         self._context.exec_cmd_callback('show run ip address', self._populate_ips)
 
         self._subscribers = []
+
+    @property
+    def loop(self):
+        return self._loop
 
     def subscribe(self, topic, evt, callback):
         sub = (topic, evt, callback)
@@ -292,7 +297,7 @@ class CiscoFwManager(SyslogListener):
         self._initialized.set()
 
     def _init_context(self, context, plugins, args):
-        context_mgr = _CiscoFwContextManager(context)
+        context_mgr = _CiscoFwContextManager(context, self._loop)
         self._contexts.append(context_mgr)
 
         # initialize plugins for context manager

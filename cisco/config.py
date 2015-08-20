@@ -140,8 +140,6 @@ class ConfigManager(object):
         self._context = context
         self._manager = manager
         self._changes = []
-        self._flushed_changes = []
-
 
         log_name = '%s(%s)' % (self.__class__.__name__, self._context.name)
         self.log = logging.getLogger(log_name)
@@ -155,8 +153,15 @@ class ConfigManager(object):
 
         self._tags = kwargs.get('tags', [])
         self._load_user_map(kwargs.get('user_map', {}))
+        self._check_freq = kwargs.get('check_freq', 7200)
+        self._check_handle = None
+        self._write_mem_timeout = kwargs.get('write_mem_timeout', 120)
 
+        # Listen for command run log events
         self._manager.subscribe(manager.LOG_EVENT, '5-111008', self._cmd_run_event)
+
+        # Pull the configuration now: note that every time check_config runs,
+        # we schedule another check for _check_freq seconds in the future.
         self.check_config()
 
     def config_updated(self, diff):
@@ -173,18 +178,27 @@ class ConfigManager(object):
         for config in self._configs:
             config.check()
 
+        # NEVER go longer than self._check_freq between checks
+        self._schedule_check(self._check_freq)
+
+    def _schedule_check(self, delay):
+        if self._check_handle is not None:
+            self._check_handle.cancel()
+
+        self._check_handle = self._manager.loop.call_later(delay, self.check_config)
+
     def _get_commit_log(self, diff):
         users = set()
         changes = []
 
         tags = self._tag_diff(diff.diff)
 
-        for cmd_time, user, cmd in self._flushed_changes:
+        for cmd_time, user, cmd in self._changes:
             tm = time.strftime('%Y-%m-%d %H:%M:%S %Z', cmd_time)
             changes.append('%s[%s](%s): %s' % (tm, self._context.name, user, cmd))
             users.add(user)
 
-        self._flushed_changes = []
+        self._changes = []
 
         if users:
             # TODO: for system context, "Changes to ____" is wrong (who gives a fuck though?).
@@ -247,17 +261,13 @@ class ConfigManager(object):
         self.log.debug("command: %s => %s", user, cmd)
         self._changes.append((cmd_time, user, cmd))
 
-        # TODO: NEED TO HANDLE TIMEOUTS
         if cmd == 'write memory':
-            self._flush_changes()
-
-    def _flush_changes(self):
-        # This needs to be done immediately: It is possible that we have queued
-        # commands, but no diff in the config -- in this case the changes never
-        # get flushed because config_updated() is not called.
-        self._flushed_changes = self._changes
-        self._changes = []
-        self.check_config()
+            self.check_config()
+        else:
+            # Every time a command is received, set a timeout for
+            # self._write_mem_timeout seconds in the future. If 'write mem' is
+            # not received before this timeout, the changes will be run
+            self._schedule_check(self._write_mem_timeout)
 
 def _parse_checksum(checksum):
     """
