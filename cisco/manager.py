@@ -256,15 +256,18 @@ class CiscoFwManager(SyslogListener):
     Main class for FW management: determines firewall mode, enumerates
     contexts, etc.
     """
-    def __init__(self, conn, loop, plugin_config):
+    def __init__(self, loop, **kwargs):
         self._loop = loop
-        self._plugin_config = plugin_config
         self._initialized = asyncio.Event(loop=self._loop)
 
         self._contexts = []
         self._is_multi_context = False
 
+        self._plugin_config = kwargs.get('plugins', {})
+
         self.log = logging.getLogger(self.__class__.__name__)
+
+        conn = CiscoSSHClient(kwargs['host'], kwargs['user'], kwargs['pass'], self._loop)
         self._loop.create_task(self._initialize(conn))
 
     @asyncio.coroutine
@@ -296,7 +299,10 @@ class CiscoFwManager(SyslogListener):
         for name in plugins:
             try:
                 kwargs = args[name]
-                context_mgr.add_plugin(plugins[name], **kwargs)
+                if kwargs is not None:
+                    context_mgr.add_plugin(plugins[name], **kwargs)
+                else:
+                    context_mgr.add_plugin(plugins[name])
             except Exception as err:
                 self.log.error('Error initializing plugin class "%s".', name)
                 self.log.exception(err)

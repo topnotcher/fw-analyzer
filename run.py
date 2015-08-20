@@ -1,11 +1,11 @@
 def main():
-    import sys, asyncio, logging
+    import sys, asyncio, logging, yaml
 
     from .syslog import SyslogServer
-    from .cisco.client import CiscoSSHClient
-    from .cisco.manager import CiscoFwManager
+    from .util.plugin import load_class
 
     logging.basicConfig(level=logging.DEBUG)
+    log = logging.getLogger('MAIN')
 
     loop = asyncio.get_event_loop()
 
@@ -13,27 +13,19 @@ def main():
     server = SyslogServer(bind_port=50514)
     server.start(loop)
 
+    config = {}
+    with open('config.yml', 'r') as fh:
+        config = yaml.load(fh)
 
-    # TODO: hard-coded
-    plugin_classes = {
-        'fwflow.cisco.config.ConfigManager': {
-            'store': {
-                'class': 'fwflow.util.git.GitFileStore',
-                'args': {
-                    'path': '/home/mario/dev/fwflow/test_repo',
-                    'push': 'origin master'
-                }
-            },
-        },
-        'fwflow.cisco.flows.FlowAnalyzer': {},
-    }
+    for fw_name in config['fws']:
+        fw = config['fws'][fw_name]
+        class_name, cls = load_class(fw['class'])
 
-    # Create a CiscoFwManager
-    conn = CiscoSSHClient(sys.argv[1], sys.argv[2], sys.argv[3], loop)
-    manager = CiscoFwManager(conn, loop, plugin_classes)
-
-    # register the CiscoFwManager as syslog receiver
-    server.register_listener(manager)
+        if cls is None:
+            log.error("Failed to load %s", class_name)
+        else:
+            manager = cls(loop, **fw['args'])
+            server.register_listener(manager)
 
     loop.run_forever()
 
