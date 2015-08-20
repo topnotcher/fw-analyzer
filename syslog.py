@@ -1,3 +1,4 @@
+import logging
 from time import mktime, strptime, strftime
 
 class SyslogListener(object):
@@ -10,6 +11,7 @@ class SyslogServer(object):
         self._loop = None
         self._transport = None
         self._listeners = []
+        self.log = logging.getLogger(self.__class__.__name__)
 
     def register_listener(self, listener):
         self._listeners.append(listener)
@@ -24,16 +26,32 @@ class SyslogServer(object):
         self._transport = transport
 
     def datagram_received(self, data, addr):
+        for log in data.split(b'\n'):
+            try:
+                if log:
+                    self._handle_log(log)
+            except:
+                self.log.error('Unhandled exception handling log')
+
+    def _handle_log(self, log):
         try:
-            pri, time, src, msg = self._parse_log(data)
-            self._dispatch_event(time, src, msg)
+            pri, time, src, msg = self._parse_log(log)
         except ValueError as err:
-            print(err)
+            self.log.error('Failed to parse msg: %r', msg)
+            self.log.error('=> %s', str(err))
             return
+        except Exception as err:
+            self.log.exception(err)
+
+        self._dispatch_event(time, src, msg)
 
     def _dispatch_event(self, time, src, msg):
         for listener in self._listeners:
-            listener.syslog_received(time, src, msg)
+            try:
+                listener.syslog_received(time, src, msg)
+            except Exception as err:
+                self.log.error('Caught exception while dispatching event to %s', listener.__class__.__name__)
+                self.log.exception(err)
 
     def _parse_log(self, log):
         pri, log = self._parse_pri(log)
