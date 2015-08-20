@@ -154,6 +154,7 @@ class ConfigManager(object):
             self._configs.append(_ManagedConfig(self, self._context.sys_conn, store))
 
         self._tags = kwargs.get('tags', [])
+        self._load_user_map(kwargs.get('user_map', {}))
 
         self._manager.subscribe(manager.LOG_EVENT, '5-111008', self._cmd_run_event)
         self.check_config()
@@ -185,18 +186,32 @@ class ConfigManager(object):
 
         self._flushed_changes = []
 
-        # TODO: for system context, "Changes to ____" is wrong (who gives a fuck though?).
-        hdr = '%sChanges to %s by %s' % (tags, self._context.name, ', '.join(users))
-
-        # TODO: user name and email need to be looked up... :
         if users:
-            user = users.pop()
-            email = '%s@foo.bar' % user
+            # TODO: for system context, "Changes to ____" is wrong (who gives a fuck though?).
+            hdr = '%sChanges to %s by %s' % (tags, self._context.name, ', '.join(users))
+            user, email = self._get_mapped_user(users.pop())
         else:
-            user = 'backup'
-            email = 'backup@foo.bar'
+            hdr = '%sChanges to %s' % (tags, self._context.name)
+            user, email = self._get_mapped_user('backup')
 
         return user, email, (hdr + (os.linesep*2) + os.linesep.join(changes))
+
+    def _load_user_map(self, user_map):
+        self._user_map = {}
+        for user in user_map:
+            user_str = user_map[user]
+            result = re.match('^(.+) <([^>]+)>', user_str)
+            if result:
+                self._user_map[user] = result.groups()
+
+    def _get_mapped_user(self, user):
+        if user in self._user_map:
+            return self._user_map[name]
+        elif '_default' in self._user_map:
+            def_user, suffix = self._user_map['_default']
+            return user, '%s@%s' % (user, suffix)
+        else:
+            return 'backup', 'backup@configure.me'
 
     def _tag_diff(self, diff):
         tags = set()
