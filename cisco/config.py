@@ -220,7 +220,7 @@ class ConfigManager(object):
 
     def _get_mapped_user(self, user):
         if user in self._user_map:
-            return self._user_map[name]
+            return self._user_map[user]
         elif '_default' in self._user_map:
             def_user, suffix = self._user_map['_default']
             return user, '%s@%s' % (user, suffix)
