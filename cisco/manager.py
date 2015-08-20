@@ -227,6 +227,10 @@ class _CiscoFwContextManager(object):
     def loop(self):
         return self._loop
 
+    @property
+    def name(self):
+        return self._context.name
+
     def subscribe(self, topic, evt, callback):
         sub = (topic, evt, callback)
         self._subscribers.append(sub)
