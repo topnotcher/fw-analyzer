@@ -342,12 +342,21 @@ class CiscoFwManager(SyslogListener):
         """
         Handle syslog received events from the SyslogServer.
         """
-        if self._initialized.is_set():
-            for context in self._contexts:
-                if context.has_ip(src.decode('ascii')):
-                    parsed = self._parse_log(msg.decode('ascii'))
-                    if parsed:
-                        context.handle_log_event(time, parsed[0], parsed[1])
+        if not self._initialized.is_set():
+            return
+
+        for context in self._contexts:
+            ip = src.decode('utf8')
+            if context.has_ip(ip):
+                self.log.info('%s has IP %s', context.name, ip)
+
+                msg = msg.decode('utf8')
+                parsed = self._parse_log(msg)
+
+                if parsed:
+                    context.handle_log_event(time, parsed[0], parsed[1])
+                else:
+                    self.log.debug('Failed to parse "%s"', msg)
 
     @staticmethod
     def _parse_log(log):
