@@ -57,7 +57,7 @@ class _GitRepoCommitRequest(_GitRepoRequest):
 
         if self._push:
             r_name, branch = self._push.split(' ')
-            remote = getattr(remo.remotes, r_name)
+            remote = getattr(repo.remotes, r_name)
             src_branch = repo.active_branch.name
             remote.push('%s:refs/heads/%s' % (src_branch, branch))
 
