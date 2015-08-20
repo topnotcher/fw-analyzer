@@ -4,6 +4,7 @@ import git
 import os
 import threading
 import queue
+import asyncio
 
 
 class _NullFileDiff(object):
@@ -117,8 +118,8 @@ class _GitRepoWorker(threading.Thread):
            request = self._queue.get()
            try:
                request.service(self._repo)
-            except Exception as err:
-                self.log.exception(err)
+           except Exception as err:
+               self.log.exception(err)
 
     def put(self, req):
         self._queue.put(req)
@@ -142,11 +143,22 @@ class GitFileStore(object):
     operations in another thread so that they can be performed from an asyncio
     event loop.
     """
-    def __init__(self, loop, path, push=None):
-        self._worker = _GitRepoWorker(path)
+    def __init__(self, path, push=None):
         self._push = push
-        self._loop = loop
-        self._worker.start()
+        self._loop = asyncio.get_event_loop()
+        self._worker = self._get_worker(path)
+
+    @classmethod
+    # This would probably make more sense implemented in _GitRepoWorker
+    def _get_worker(cls, path):
+        if not hasattr(cls, '_workers'):
+            setattr(cls, '_workers', {})
+
+        if path not in cls._workers:
+            cls._workers[path] = _GitRepoWorker(path)
+            cls._workers[path].start()
+
+        return cls._workers[path]
 
     def update_file(self, file_name, content, callback):
         """

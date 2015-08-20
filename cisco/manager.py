@@ -20,7 +20,7 @@ import logging
 
 from ..syslog import SyslogListener
 from .client import CiscoSSHClient
-from ..util.git import GitFileStore
+from ..util.plugin import load_class
 
 class CiscoFwContext(object):
     """
@@ -256,8 +256,9 @@ class CiscoFwManager(SyslogListener):
     Main class for FW management: determines firewall mode, enumerates
     contexts, etc.
     """
-    def __init__(self, conn, loop, config):
+    def __init__(self, conn, loop, plugin_config):
         self._loop = loop
+        self._plugin_config = plugin_config
         self._initialized = asyncio.Event(loop=self._loop)
 
         self._contexts = []
@@ -276,18 +277,11 @@ class CiscoFwManager(SyslogListener):
         else:
             self._is_multi_context = False
 
-        store = GitFileStore(self._loop, '/home/mario/dev/fwflow/test_repo', push='origin master')
-
-        # TODO: hard-coded
-        plugin_classes = {
-            'fwflow.cisco.config.ConfigManager': {'store': store},
-            'fwflow.cisco.flows.FlowAnalyzer': {},
-        }
-        plugins = self._load_plugins(plugin_classes)
+        plugins = self._load_plugins(self._plugin_config)
 
         for context in contexts:
             try:
-                self._init_context(context, plugins, plugin_classes)
+                self._init_context(context, plugins, self._plugin_config)
             except Exception as err:
                 self.log.error('Error initializing _CisoFwContextManager(%s).', context.name)
                 self.log.exception(err)
@@ -308,7 +302,7 @@ class CiscoFwManager(SyslogListener):
                 self.log.exception(err)
 
     def _load_plugins(self, plugin_classes):
-        plugins = map(_load_class, plugin_classes)
+        plugins = map(load_class, plugin_classes)
         loaded_plugins = {}
 
         for name, cls in plugins:
@@ -496,24 +490,6 @@ def _get_contexts(conn):
             contexts.append((result.group(2), is_admin))
 
     return contexts
-
-def _load_class(name):
-    path = name.split('.')
-    cls = None
-    try:
-        mod = __import__('.'.join(path[:-1]))
-        for attr in path[1:]:
-            if hasattr(mod, attr):
-                mod = getattr(mod, attr)
-                cls = mod
-            else:
-                cls = None
-                break
-    except ImportError:
-        pass
-
-    return (name, cls)
-
 
 @asyncio.coroutine
 def _test_save_all_configs(conn, loop):

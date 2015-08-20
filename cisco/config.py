@@ -5,6 +5,8 @@ import re
 import time
 from hashlib import md5
 
+from ..util.plugin import load_class
+
 __ALL__ = ['ConfigManager']
 
 class _NullFileDiff(object):
@@ -66,10 +68,16 @@ class _ManagedConfig(object):
         self._context = context
         self._config_manager = config_manager
 
+        self._store = None
+
         # Some backing store where we save the config
         if store is not None:
-            self._store = store
-        else:
+            name, cls = load_class(store['class'])
+            if cls is not None:
+                self._store = cls(**store['args'])
+
+        # TODO: should I keep this here?
+        if self._store is None:
             self._store = _NullFileStore()
 
         # Checksum of the last stored config
@@ -188,10 +196,10 @@ class ConfigManager(object):
 
         self._flushed_changes = []
 
-        # TODO: for system context, "Changes to ____" is wrong.
+        # TODO: for system context, "Changes to ____" is wrong (who gives a fuck though?).
         hdr = '%sChanges to %s by %s' % (tag_str, self._context.name, ', '.join(users))
 
-        # TODO: user name nad email need to be looked up... :
+        # TODO: user name and email need to be looked up... :
         if users:
             user = users.pop()
             email = '%s@foo.bar' % user
