@@ -142,16 +142,18 @@ class ConfigManager(object):
         self._changes = []
         self._flushed_changes = []
 
-        store = kwargs.get('store', None)
 
         log_name = '%s(%s)' % (self.__class__.__name__, self._context.name)
         self.log = logging.getLogger(log_name)
 
+        store = kwargs.get('store', None)
         self._configs = [_ManagedConfig(self, context, store)]
 
         # This is somewhat dirty...
         if self._context.is_admin and self._context.sys_conn:
             self._configs.append(_ManagedConfig(self, self._context.sys_conn, store))
+
+        self._tags = kwargs.get('tags', [])
 
         self._manager.subscribe(manager.LOG_EVENT, '5-111008', self._cmd_run_event)
         self.check_config()
@@ -174,20 +176,7 @@ class ConfigManager(object):
         users = set()
         changes = []
 
-        # TODO: ISSUE FUCKING TAGGING???????????????????????
-        # TODO: this is horribly done!
-        tag_strs = ('CR-[0-9]+',)
-        tags = set()
-
-        for line in diff.diff.splitlines():
-            for tag in tag_strs:
-                result = re.match('.*(%s)' % tag, line)
-                if result:
-                    tags.add(result.group(1))
-        if tags:
-            tag_str = ', '.join(tags) + ' '
-        else:
-            tag_str = ''
+        tags = self._tag_diff(diff.diff)
 
         for cmd_time, user, cmd in self._flushed_changes:
             tm = time.strftime('%Y-%m-%d %H:%M:%S %Z', cmd_time)
@@ -197,7 +186,7 @@ class ConfigManager(object):
         self._flushed_changes = []
 
         # TODO: for system context, "Changes to ____" is wrong (who gives a fuck though?).
-        hdr = '%sChanges to %s by %s' % (tag_str, self._context.name, ', '.join(users))
+        hdr = '%sChanges to %s by %s' % (tags, self._context.name, ', '.join(users))
 
         # TODO: user name and email need to be looked up... :
         if users:
@@ -208,6 +197,19 @@ class ConfigManager(object):
             email = 'backup@foo.bar'
 
         return user, email, (hdr + (os.linesep*2) + os.linesep.join(changes))
+
+    def _tag_diff(self, diff):
+        tags = set()
+
+        for line in diff.splitlines():
+            for tag in self._tags:
+                result = re.match('.*(%s)' % tag, line)
+                if result:
+                    tags.add(result.group(1))
+        if tags:
+            return ', '.join(tags) + ' '
+        else:
+            return ''
 
     def _cmd_run_event(self, cmd_time, msg):
         IGNORED_USERS = ['failover']
