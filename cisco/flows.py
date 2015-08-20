@@ -7,10 +7,12 @@ class FlowAnalyzer(object):
         self._context = context
         self._manager = manager
 
-        self._manager.subscribe(self._manager.CONFIG_EVENT, 'updated', self._config_updated)
+        self._manager.subscribe(self._manager.CONFIG_EVENT, 'updated', self._get_acls)
         self._manager.subscribe(self._manager.LOG_EVENT, '6-106100', self._acl_entry_hit)
 
-    def _config_updated(self):
+        self._get_acls()
+
+    def _get_acls(self):
         self._context.exec_cmd_callback('show access-list', self._update_acl)
 
     def _update_acl(self, acl):
