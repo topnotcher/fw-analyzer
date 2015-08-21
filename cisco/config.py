@@ -243,7 +243,7 @@ class ConfigManager(object):
     def _cmd_run_event(self, cmd_time, msg):
         IGNORED_USERS = ['failover']
         IGNORED_COMMANDS = ['changeto', 'perfmon interval', 'copy', 'show',
-                            'ping', 'enable', 'configure', 'terminal']
+                            'ping', 'enable', 'configure', 'terminal', 'dir ', 'exit']
 
         result = re.match("^User '([^']+)' executed the '([^']+)' command\.$", msg)
         if not result:
