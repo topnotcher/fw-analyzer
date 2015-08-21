@@ -370,66 +370,111 @@ class ACELineParser(object):
         if re.match('0x[a-f0-9]+', next_tok):
             self.populate('hash', int(self.toks.pop(0), 16))
 
+class _Iterator(object):
+    def __init__(self, lst):
+        self._list = lst
+        self._idx = -1
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self._idx += 1
+
+        if self._idx >= len(self._list):
+            raise StopIteration
+
+        return self.cur()
+
+    def prev(self):
+        self._idx -= 1
+        return self.cur()
+
+    def cur(self):
+        return self._list[self._idx]
 
 class ACLParser(object):
-    def __init__(self, name, elements):
-        self.elements = elements
-        self.consumed_elements = 0
+    def __init__(self, name):
         self.remarks = []
 
         self.acl = ACL(name)
         self.ace = None
 
     def consume(self, it):
-        while self.consumed_elements < self.elements:
-            try:
-                self.consume_line(next(it))
-            except StopIteration:
-                break
+        try:
+            line = next(it)
+
+            level = get_indent(line)
+
+            parser = ACELineParser(line)
+            data = {}
+            data = parser.parse()
+
+            if level == 0:
+                if data['type'] == 'remark':
+                    self.remarks.append(data['remark'])
+                else:
+                    if self.ace is not None:
+                        self.acl.add_ace(self.ace)
+
+                    self.ace = ACE(data, self.remarks)
+                    self.remarks = []
+
+            elif level == 2:
+                self.ace.add_rule(data)
+
+        except StopIteration:
+            pass
 
         return self.acl
 
-    def consume_line(self, line):
-        level = get_indent(line)
-
-        parser = ACELineParser(line)
-        data = {}
-        data = parser.parse()
-
-        if data['type'] != 'remark':
-            self.consumed_elements += 1
-
-        if level == 0:
-            if data['type'] == 'remark':
-                self.remarks.append(data['remark'])
-            else:
-                if self.ace is not None:
-                    self.acl.add_ace(self.ace)
-
-                self.ace = ACE(data, self.remarks)
-                self.remarks = []
-
-        elif level == 2:
-            self.ace.add_rule(data)
-
 def parse(data):
-    acls = []
 
     i = iter(data.splitlines())
-    for line in i:
 
+    acls = []
+    acl = None
+    ace = None
+    remarks = []
+    for line in i:
         result = re.match('access-list [^;]+; [0-9]+ elements;', line)
         if result:
-            name, acl_elements = parse_hdr(line)
+            acl_name, _ = parse_hdr(line)
 
-            parser = ACLParser(name, acl_elements)
-            acl = parser.consume(i)
-            acls.append(acl)
+            if acl:
+                acls.append(acl)
+
+            acl = ACL(acl_name)
+
+        elif acl and line.startswith('access-list ' + acl.name):
+            level = get_indent(line)
+
+            parser = ACELineParser(line)
+            data = {}
+            data = parser.parse()
+
+            if level == 0:
+                if data['type'] == 'remark':
+                    remarks.append(data['remark'])
+                else:
+                    if ace is not None:
+                        acl.add_ace(ace)
+
+                    ace = ACE(data, remarks)
+                    remarks = []
+
+            elif level == 2:
+                ace.add_rule(data)
+
+    if acl:
+        acls.append(acl)
+        if ace:
+            acl.add_ace(ace)
 
     return acls
 
 if __name__ == '__main__':
-    with open('../data/acl.txt') as fh:
+    with open('../data/acl2.txt') as fh:
         acls = parse(fh.read())
 
         print('%d acls' % len(acls))
