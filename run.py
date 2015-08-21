@@ -17,7 +17,7 @@ def parse_args():
                                      description='Run fwaudit')
 
     parser.add_argument('--port', '-p', metavar='PORT', type=int, nargs='?',
-                        help='UDP syslog port', dest='bind_port', default=8750)
+                        help='UDP syslog port', dest='bind_port')
 
     parser.add_argument('--config', '-c', metavar='FILE', type=str, nargs='?', required=True,
                         help='Path to configuration file')
