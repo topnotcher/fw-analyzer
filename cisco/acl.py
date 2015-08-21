@@ -1,5 +1,8 @@
 import inspect
 import re
+import logging
+
+__ALL__ = ['parse']
 
 class ACL(object):
     def __init__(self, name):
@@ -16,6 +19,10 @@ class ACL(object):
             st += str(rule) + '\n'
 
         return st
+
+    def __iter__(self):
+        for rule in self.rules:
+            yield rule
 
 class ACE(object):
     def __init__(self, entry, remarks=None):
@@ -43,6 +50,10 @@ class ACE(object):
                 st +=  ' '*(4*(level+1)) + '%s: %s\n' % (field, str(rule[field]))
 
         return st
+
+    def __iter__(self):
+        for rule in self.rules:
+            yield rule
 
 def get_indent(line):
     i = 0
@@ -308,11 +319,13 @@ class ACELineParser(object):
             qual = toks.pop(0)
             target[qual] = toks.pop(0)
 
-        elif next_tok == 'range' and next_next_tok.isdigit():
+        elif next_tok == 'range': # and next_next_tok.isdigit():
             toks.pop(0)
             target['range'] = (toks.pop(0), toks.pop(0))
 
-        elif self.data['ip_proto'] == 'icmp' and next_tok in ('echo', 'time-exceeded', 'unreachable'):
+        # TODO: remove echo reply from the F
+        # TODO: remove echo reply from the FWW
+        elif self.data['ip_proto'] == 'icmp' and next_tok in ('echo', 'echo-reply', 'time-exceeded', 'unreachable'):
             target['icmp_type'] = toks.pop(0)
 
         elif next_tok in ('object-group', 'object'):
@@ -321,12 +334,22 @@ class ACELineParser(object):
 
         return target
 
+    @consume_next_tok('time-range')
+    def _consume_time_range(self):
+        self.populate('time-range', self.toks.pop(0))
+
     @consume_next_tok('log')
     def _consume_log(self):
         next_tok = self.toks[0]
 
-        if next_tok in ('emergencies', 'warnings', 'informational', 'disable', 'errors', 'alerts', 'debugging') or next_tok.isdigit():
-            self.toks.pop(0)
+        levels = ('emergencies', 'warnings', 'informational',
+                  'disable', 'errors', 'alerts', 'debugging')
+
+        if next_tok in levels or next_tok.isdigit():
+            level = self.toks.pop(0)
+
+            if level != 'disabled':
+                self.populate('log', level)
 
         next_tok = self.toks[0]
         if next_tok == 'interval':
@@ -345,7 +368,7 @@ class ACELineParser(object):
     def _consume_hash(self):
         next_tok = self.toks[0]
         if re.match('0x[a-f0-9]+', next_tok):
-            self.populate('hash', self.toks.pop(0))
+            self.populate('hash', int(self.toks.pop(0), 16))
 
 
 class ACLParser(object):
@@ -389,25 +412,26 @@ class ACLParser(object):
         elif level == 2:
             self.ace.add_rule(data)
 
-def parse_file(file_name):
-    fh = open(file_name, 'r')
-
+def parse(data):
     acls = []
-    for line in fh:
-        try:
+
+    i = iter(data.splitlines())
+    for line in i:
+
+        result = re.match('access-list [^;]+; [0-9]+ elements;', line)
+        if result:
             name, acl_elements = parse_hdr(line)
-        #   1 access-list cached ACL log flows: total 0, denied 0 (deny-flow-max 4096) alert-interval 300
-        except ValueError:
-            continue
 
-        parser = ACLParser(name, acl_elements)
-        acl = parser.consume(fh)
-        acls.append(acl)
+            parser = ACLParser(name, acl_elements)
+            acl = parser.consume(i)
+            acls.append(acl)
 
-    fh.close()
-    print('%d acls' % len(acls))
-    for acl in acls:
-        print(acl)
+    return acls
 
 if __name__ == '__main__':
-    parse_file('../data/acl.txt')
+    with open('../data/acl.txt') as fh:
+        acls = parse(fh.read())
+
+        print('%d acls' % len(acls))
+        for acl in acls:
+            print(acl)
