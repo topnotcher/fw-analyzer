@@ -232,7 +232,7 @@ class ConfigManager(object):
 
         for line in diff.splitlines():
             for tag in self._tags:
-                result = re.match('.*(%s)' % tag, line)
+                result = re.match('^[+-].*(%s)' % tag, line)
                 if result:
                     tags.add(result.group(1))
         if tags:
