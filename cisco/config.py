@@ -231,10 +231,13 @@ class ConfigManager(object):
         tags = set()
 
         for line in diff.splitlines():
+            if not line[0] in ('+', '-'):
+                continue
+
             for tag in self._tags:
-                result = re.match('^[+-].*(%s)' % tag, line)
+                result = re.findall('%s' % tag, line)
                 if result:
-                    tags.add(result.group(1))
+                    tags.update(result)
         if tags:
             return ', '.join(tags) + ' '
         else:
