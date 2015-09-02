@@ -244,7 +244,7 @@ class ConfigManager(object):
             return ''
 
     def _cmd_run_event(self, cmd_time, msg):
-        IGNORED_USERS = ['failover']
+        IGNORED_USERS = ['failover', 'Cisco']
         IGNORED_COMMANDS = ['changeto', 'perfmon interval', 'copy', 'show',
                             'ping', 'enable', 'configure', 'terminal', 'dir ', 'exit']
 
