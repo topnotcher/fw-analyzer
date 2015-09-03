@@ -67,6 +67,8 @@ class _CiscoFwContextManager(object):
     def has_ip(self, ipaddr):
         """
         Determine if this context has the given ip address.
+
+        NOTE: This does not update when config changes!
         """
         return ipaddr in self._ips
 
