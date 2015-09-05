@@ -203,7 +203,13 @@ class CiscoSSHClient(asyncssh.SSHClient): # pylint: disable=too-many-instance-at
         if self._conn is not None:
             return
 
-        self._conn, _ = yield from asyncssh.create_connection(lambda: self, self._host, **self._login)
+        while self._conn is None:
+            try:
+                self._conn, _ = yield from asyncssh.create_connection(lambda: self, self._host, **self._login)
+            except TimeoutError:
+                self.log.debug('Timeout! Sleeping for a bit.')
+                asyncio.sleep(60)
+
         self._stdin, self._stdout, _ = yield from self._conn.open_session(encoding=None)
 
         # If auto-enable is enabled, the prompt will end with #; otherwise it will end with >
