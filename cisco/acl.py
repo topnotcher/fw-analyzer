@@ -457,10 +457,11 @@ def parse(data):
                 if data['type'] == 'remark':
                     remarks.append(data['remark'])
                 else:
-                    if ace is not None:
-                        acl.add_ace(ace)
+                    #if ace is not None:
+                    #    acl.add_ace(ace)
 
                     ace = ACE(data, remarks)
+                    acl.add_ace(ace)
                     remarks = []
 
             elif level == 2:
@@ -468,13 +469,13 @@ def parse(data):
 
     if acl:
         acls.append(acl)
-        if ace:
-            acl.add_ace(ace)
+        #if ace:
+            #acl.add_ace(ace)
 
     return acls
 
 if __name__ == '__main__':
-    with open('../data/acl2.txt') as fh:
+    with open('data') as fh:
         acls = parse(fh.read())
 
         print('%d acls' % len(acls))
